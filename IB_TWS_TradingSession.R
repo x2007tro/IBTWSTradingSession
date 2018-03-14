@@ -29,14 +29,20 @@ def_fnltradelist_colnames <- c("LocalTicker","Action","Quantity","OrderType",
 #
 TradingSession <- function(c_id, 
                            c_type = c("TWS", "IBG"),
-                           l_host = "localhost"){
+                           l_host = "localhost",
+                           acct_type = c("Live", "Paper")){
   
   ct <- match.arg(c_type)
+  at <- match.arg(acct_type)
   
   if(ct == "TWS"){
-    my_conn <- twsConnect(clientId = c_id, host = l_host)
+    ifelse(at == "Live", 
+           my_conn <- twsConnect(clientId = c_id, host = l_host, port = 7496),
+           my_conn <- twsConnect(clientId = c_id, host = l_host, port = 7497))
   } else if (ct == "IBG"){
-    my_conn <- ibgConnect(clientId = c_id, host = l_host)
+    ifelse(at == "Live", 
+           my_conn <- ibgConnect(clientId = c_id, host = l_host, port = 7496),
+           my_conn <- ibgConnect(clientId = c_id, host = l_host, port = 7497))
   } else {
     res <- "Error connection type!"
   }
