@@ -36,14 +36,17 @@ TradingSession <- function(c_id,
   at <- match.arg(acct_type)
   
   if(ct == "TWS"){
-    ifelse(at == "Live", 
-           my_conn <- twsConnect(clientId = c_id, host = l_host, port = 7496),
-           my_conn <- twsConnect(clientId = c_id, host = l_host, port = 7497))
+    if(at == "Live"){
+      my_conn <- twsConnect(clientId = c_id, host = l_host, port = 7496)
+    } else {
+      my_conn <- twsConnect(clientId = c_id, host = l_host, port = 7497)
+    }
   } else if (ct == "IBG"){
-    ifelse(at == "Live", 
-           my_conn <- ibgConnect(clientId = c_id, host = l_host, port = 7496),
-           my_conn <- ibgConnect(clientId = c_id, host = l_host, port = 7497))
-    my_conn <- ibgConnect(clientId = c_id, host = l_host)
+    if(at == "Live"){
+      my_conn <- ibgConnect(clientId = c_id, host = l_host, port = 7496)
+    } else {
+      my_conn <- ibgConnect(clientId = c_id, host = l_host, port = 7497)
+    }
   } else {
     res <- "Error connection type!"
   }
