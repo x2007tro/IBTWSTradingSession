@@ -78,7 +78,6 @@ TradingSession <- function(c_id,
                       AdjustedLimitPrice = numeric(0),
                       Commission = character(0),
                       Currency = character(0),
-                      
                       stringsAsFactors = FALSE))
   }
   if(isConnected(my_conn)){
@@ -440,7 +439,7 @@ TSExecuteTrade.TradingSession <- function(ts, single_trade){
           }
           
           bad.buy.order <- 0
-          if(us.order.value > us_cash_balance | ca.order.value > ca_cash_balance){
+          if(us.order.value > max(us_cash_balance,0) | ca.order.value > max(ca_cash_balance,0)){
               bad.buy.order <- 1
             }
         } else {
