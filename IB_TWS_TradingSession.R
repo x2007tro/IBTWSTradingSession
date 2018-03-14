@@ -105,7 +105,7 @@ TradingSession <- function(c_id,
                 ts_trade_results = NULL,
                 ts_trade_summary = NULL,
                 ts_trade_transmit_switch = FALSE,
-				ts_last_trade_message = NULL,
+				        ts_last_trade_message = NULL,
                 ts_trade_gooduntildate = as.Date(reqCurrentTime(my_conn)))
     class(res) <- append(class(res), "TradingSession")
     res <- TSRetrievePortHoldings(res)
@@ -134,28 +134,35 @@ TSRetrievePortHoldings.TradingSession <- function(ts){
     # Retrieve portfolio holdings data
     #
     km.port.holdings.prelim <- km.port.prelim[[2]]
-    km.port.holdings <- NULL
-    for(i in 1:length(km.port.holdings.prelim)){
-      local <- km.port.holdings.prelim[[i]]$contract$local
-      sectype <- km.port.holdings.prelim[[i]]$contract$sectype
-      exc <- km.port.holdings.prelim[[i]]$contract$exch
-      curr <- km.port.holdings.prelim[[i]]$contract$currency
-      pos <- km.port.holdings.prelim[[i]]$portfolioValue$position
-      prc <- km.port.holdings.prelim[[i]]$portfolioValue$marketPrice
-      val <- km.port.holdings.prelim[[i]]$portfolioValue$marketValue
-      avgcost <- km.port.holdings.prelim[[i]]$portfolioValue$averageCost
-      unrealizedPNL <- km.port.holdings.prelim[[i]]$portfolioValue$unrealizedPNL
-      realizedPNL <- km.port.holdings.prelim[[i]]$portfolioValue$realizedPNL
-      dt <- as.Date(ts$ts_session_start_time)
-      
-      holding <- data.frame(dt, local, sectype, exc, curr, pos, prc, val, avgcost, unrealizedPNL, realizedPNL, ts$ts_session_start_time)
-      
-      if(i == 1){
-        km.port.holdings <- holding 
-      } else {
-        km.port.holdings <- rbind.data.frame(km.port.holdings, holding)
+    
+    if(length(km.port.holdings.prelim) == 0){
+      km.port.holdings <- data.frame(as.Date(integer(0)), character(0), character(0), character(0), character(0), 
+                                     numeric(0), numeric(0), numeric(0), numeric(0), numeric(0), numeric(0), as.Date(integer(0)))
+    } else {
+      km.port.holdings <- NULL
+      for(i in 1:length(km.port.holdings.prelim)){
+        local <- km.port.holdings.prelim[[i]]$contract$local
+        sectype <- km.port.holdings.prelim[[i]]$contract$sectype
+        exc <- km.port.holdings.prelim[[i]]$contract$exch
+        curr <- km.port.holdings.prelim[[i]]$contract$currency
+        pos <- km.port.holdings.prelim[[i]]$portfolioValue$position
+        prc <- km.port.holdings.prelim[[i]]$portfolioValue$marketPrice
+        val <- km.port.holdings.prelim[[i]]$portfolioValue$marketValue
+        avgcost <- km.port.holdings.prelim[[i]]$portfolioValue$averageCost
+        unrealizedPNL <- km.port.holdings.prelim[[i]]$portfolioValue$unrealizedPNL
+        realizedPNL <- km.port.holdings.prelim[[i]]$portfolioValue$realizedPNL
+        dt <- as.Date(ts$ts_session_start_time)
+        
+        holding <- data.frame(dt, local, sectype, exc, curr, pos, prc, val, avgcost, unrealizedPNL, realizedPNL, ts$ts_session_start_time)
+        
+        if(i == 1){
+          km.port.holdings <- holding 
+        } else {
+          km.port.holdings <- rbind.data.frame(km.port.holdings, holding)
+        }
       }
     }
+    
     colnames(km.port.holdings) <- def_port_holdings_colnames
     ts$ts_port_holdings <- km.port.holdings
   } else {
