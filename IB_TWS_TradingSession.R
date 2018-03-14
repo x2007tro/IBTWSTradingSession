@@ -29,8 +29,8 @@ def_fnltradelist_colnames <- c("LocalTicker","Action","Quantity","OrderType",
 #
 TradingSession <- function(c_id, 
                            c_type = c("TWS", "IBG"),
-                           l_host = "localhost",
-                           acct_type = c("Live", "Paper")){
+                           acct_type = c("Live", "Paper"),
+                           l_host = "localhost"){
   
   ct <- match.arg(c_type)
   at <- match.arg(acct_type)
@@ -43,6 +43,7 @@ TradingSession <- function(c_id,
     ifelse(at == "Live", 
            my_conn <- ibgConnect(clientId = c_id, host = l_host, port = 7496),
            my_conn <- ibgConnect(clientId = c_id, host = l_host, port = 7497))
+    my_conn <- ibgConnect(clientId = c_id, host = l_host)
   } else {
     res <- "Error connection type!"
   }
