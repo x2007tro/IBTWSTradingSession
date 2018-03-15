@@ -407,8 +407,9 @@ TSExecuteTrade.TradingSession <- function(ts, single_trade){
     new_ts <- TSRetrievePortInfo(ts)
     us_cash_balance <- new_ts$ts_us_cash_balance
     ca_cash_balance <- new_ts$ts_ca_cash_balance
+    exch_rate <- new_ts$ts_exchange_rate
     
-    if(identical(colnames(single_trade),def_fnltradelist_colnames)){
+    if(identical(colnames(single_trade),def_fnltradelist_colnames) | tolower(single_trade[,"SecurityType"]) == "forex"){
       #
       # Validate and execute a single trade
       #
@@ -470,6 +471,11 @@ TSExecuteTrade.TradingSession <- function(ts, single_trade){
           o <- single_trade$OrderType
           p <- single_trade$AdjustedLimitPrice
           c <- single_trade$Currency
+          if(c == "USD"){
+            pe <- "NASDAQ"
+          } else if(c == 'CAD') {
+            pe <- "TSE"
+          }
           gtd <- format(Sys.Date(),"%Y%m%d 23:59:5900")
           if(tolower(o) == "mkt"){
             # Market Order
@@ -477,7 +483,7 @@ TSExecuteTrade.TradingSession <- function(ts, single_trade){
             trd_res <- placeOrder(ts$ts_conn,
                                   twsEquity(symbol = t,
                                             exch = "SMART",
-                                            primary = "NASDAQ",
+                                            primary = pe,
                                             currency = c),
                                   twsOrder(orderId = trd_id,
                                            action = ac,
@@ -493,7 +499,7 @@ TSExecuteTrade.TradingSession <- function(ts, single_trade){
             trd_res <- placeOrder(ts$ts_conn,
                                   twsEquity(symbol = t,
                                             exch = "SMART",
-                                            primary = "NASDAQ",
+                                            primary = pe,
                                             currency = c),
                                   twsOrder(orderId = trd_id,
                                            action = ac,
@@ -518,10 +524,49 @@ TSExecuteTrade.TradingSession <- function(ts, single_trade){
           ts$ts_last_trade_message <- msg
           print(msg)
         }
+      } else if(tolower(single_trade[,"SecurityType"]) == "forex"){
+        #
+        # Validate a trade
+        #
+        base_curr <- single_trade[,"From"]
+        tgt_curr <- single_trade[,"To"]
+        order_value <- single_trade[,"Quantity"]
+        trade_transmit <- single_trade[,"TradeSwitch"]
+        if(base_curr == "CAD" & tgt_curr == "USD"){
+          if(ca_cash_balance < order_value){
+            bad.buy.order = 1
+          }
+        } else if (base_curr == "USD" & tgt_curr == "CAD"){
+          if(us_cash_balance < order_value){
+            bad.buy.order = 1
+          }
+        } else {
+          print("Error only USD and CAD are allowed to traded.")
+        }
+        #
+        # Execute the trade
+        #
+        if(bad.buy.order == 0){
+          gtd <- format(Sys.Date(),"%Y%m%d 23:59:5900")
+          # Market Order
+          trd_id <- reqIds(ts$ts_conn)
+          trd_res <- placeOrder(ts$ts_conn,
+                                twsCurrency(paste0(tgt_curr,".",base_curr)),
+                                twsOrder(orderId = trd_id,
+                                         action = "BUY",
+                                         totalQuantity = order_value,
+                                         orderType = "MKT",
+                                         transmit = ts$ts_trade_transmit_switch,
+                                         #goodTillDate = gtd,
+                                         outsideRTH = "1"))
+          Sys.sleep(1)
+          ts$ts_trade_ids <- c(ts$ts_trade_ids, trd_id)
+          ts$ts_trade_results <- c(ts$ts_trade_results, "Successful")
+        }
       } else {
         ts$ts_trade_ids <- c(ts$ts_trade_ids, -1)
         ts$ts_trade_results <- c(ts$ts_trade_results, "Fail")
-        msg <- "Error currently only equity is allowed to be trade!"
+        msg <- "Error currently only equity and currenct are allowed to be traded!"
         ts$ts_last_trade_message <- msg
         print(msg)
       }
@@ -562,6 +607,10 @@ TSExecuteAllTrades.TradingSession <- function(ts){
   }
   return(ts)
 }
+
+#
+#
+#
 
 #
 # Cancel Order
