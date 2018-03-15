@@ -610,8 +610,10 @@ TSGenTradeResults.default <- function(ts){ return(ts) }
 TSGenTradeResults.TradingSession <- function(ts){
   if(isConnected(ts$ts_conn)){
     temp_df <- ts$ts_fnlTradelist[,c("LocalTicker","Currency")]
-    temp_df$TradeID <- ts$ts_trade_ids
-    temp_df$TradeResult <- ts$ts_trade_results
+    exp_trd_cnt <- nrow(temp_df)
+    act_trd_cnt <- length(ts$ts_trade_ids)
+    temp_df$TradeID <- ts$ts_trade_ids[(act_trd_cnt-exp_trd_cnt+1):act_trd_cnt]
+    temp_df$TradeResult <- ts$ts_trade_results[(act_trd_cnt-exp_trd_cnt+1):act_trd_cnt]
     ts$ts_trade_summary <- temp_df
   } else {
     print("Error connection to IB TWS!")
