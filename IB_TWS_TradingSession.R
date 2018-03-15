@@ -21,8 +21,8 @@ def_watchlist_colnames <- c("LocalTicker","Currency","SecurityType","Comments")
 def_prelimtradelist_colnames <- c("LocalTicker","Action","Quantity","OrderType",
                                   "LimitPrice","SecurityType","Currency","TradeSwitch")
 def_fnltradelist_colnames <- c("LocalTicker","Action","Quantity","OrderType",
-                                "AdjustedLimitPrice","LastTradePrice","SecurityType",
-                                "Currency","Commission","ValidTicker")
+                               "AdjustedLimitPrice","LastTradePrice","SecurityType",
+                               "Currency","Commission","ValidTicker")
 
 #
 # Defind class - TradingSession
@@ -104,7 +104,7 @@ TradingSession <- function(c_id,
                 ts_trade_results = NULL,
                 ts_trade_summary = NULL,
                 ts_trade_transmit_switch = FALSE,
-				        ts_last_trade_message = NULL,
+                ts_last_trade_message = NULL,
                 ts_trade_gooduntildate = as.Date(reqCurrentTime(my_conn)))
     class(res) <- append(class(res), "TradingSession")
     res <- TSRetrievePortHoldings(res)
@@ -114,10 +114,24 @@ TradingSession <- function(c_id,
     # Update portfolio snapshot data
     #
     LocalSaveData(res)
+    print(paste0("Trading session ", c_id, " is open."))
   } else {
     res <- "Error connection to IB TWS!"
   }
   return(res)
+}
+
+#
+# Check if connected
+#
+TSIsConnected <- function(ts) UseMethod("TSIsConnected")
+TSIsConnected.default <- function(ts){ return(ts) }
+TSIsConnected.TradingSession <- function(ts){
+  if(isConnected(ts$ts_conn)){
+    return(TRUE)
+  } else {
+    return(FALSE)
+  }
 }
 
 #
@@ -188,15 +202,15 @@ TSRetrievePortInfo.TradingSession <- function(ts){
     # TotalCashValue = EquityWithLoanValue + Sales at the time of trade
     #
     km.port.info <- rbind.data.frame(km.port.prelim[[1]]$NetLiquidation,
-                                         km.port.prelim[[1]]$GrossPositionValue,
-                                         km.port.prelim[[1]]$EquityWithLoanValue,
-                                         km.port.prelim[[1]]$TotalCashValue,
-                                         km.port.prelim[[1]]$CashBalance,
-                                         km.port.prelim[[1]]$ExchangeRate,
-                                         km.port.prelim[[1]]$AccruedDividend)
+                                     km.port.prelim[[1]]$GrossPositionValue,
+                                     km.port.prelim[[1]]$EquityWithLoanValue,
+                                     km.port.prelim[[1]]$TotalCashValue,
+                                     km.port.prelim[[1]]$CashBalance,
+                                     km.port.prelim[[1]]$ExchangeRate,
+                                     km.port.prelim[[1]]$AccruedDividend)
     
     rownames(km.port.info) <- c("NetLiquidation","GrossPositionValue","EquityWithLoanValue","TotalCashValue",
-                                    "CashBalance","ExchangeRate","AccruedDividend")
+                                "CashBalance","ExchangeRate","AccruedDividend")
     colnames(km.port.info) <- c("Value","Currency")
     km.port.info$Value <- as.numeric(as.character(km.port.info$Value))
     km.port.info$Currency <- as.character(km.port.info$Currency)
@@ -338,7 +352,7 @@ TSGenFnlTradeList.TradingSession <- function(ts){
       man_trd_df$LastTimeStamp <- rep(Sys.Date(),nrow(man_trd_df))
       man_trd_df$Commission <- rep(0,nrow(man_trd_df))
       man_trd_df$ValidTicker <- rep(TRUE,nrow(man_trd_df))
-
+      
       for(i in 1:nrow(man_trd_df)){
         #
         # Update commission
@@ -440,79 +454,89 @@ TSExecuteTrade.TradingSession <- function(ts, single_trade){
           
           bad.buy.order <- 0
           if(us.order.value > max(us_cash_balance,0) | ca.order.value > max(ca_cash_balance,0)){
-              bad.buy.order <- 1
-            }
+            bad.buy.order <- 1
+          }
         } else {
           print("Error invalid trade.")
         }
         
-          #
-          # Execute the trade
-          #
-          if(bad.buy.order == 0 & bad.sell.order == 0 & single_trade$ValidTicker == TRUE){
-            t <- single_trade$LocalTicker
-            ac <- single_trade$Action
-            q <- single_trade$Quantity
-            o <- single_trade$OrderType
-            p <- single_trade$AdjustedLimitPrice
-            c <- single_trade$Currency
-            gtd <- format(Sys.Date(),"%Y%m%d 23:59:5900")
-          
+        #
+        # Execute the trade
+        #
+        if(bad.buy.order == 0 & bad.sell.order == 0 & single_trade$ValidTicker == TRUE){
+          t <- single_trade$LocalTicker
+          ac <- single_trade$Action
+          q <- single_trade$Quantity
+          o <- single_trade$OrderType
+          p <- single_trade$AdjustedLimitPrice
+          c <- single_trade$Currency
+          gtd <- format(Sys.Date(),"%Y%m%d 23:59:5900")
+          if(tolower(o) == "mkt"){
+            # Market Order
             trd_id <- reqIds(ts$ts_conn)
-            if(tolower(o) == "mkt"){
-              # Market Order
-              #Sys.sleep(1)
-              trd_res <- placeOrder(ts$ts_conn,
-                                    twsEquity(symbol = t,
-                                              currency = c),
-                                    twsOrder(orderId = trd_id,
-                                              action = ac,
-                                              totalQuantity = q,
-                                              orderType = "MKT",
-                                              transmit = ts$ts_trade_transmit_switch,
-                                              #goodTillDate = gtd,
-                                              outsideRTH = "1"))
-              Sys.sleep(1)
-            } else if (tolower(o) == "lmt") {
-              # Limit order
-              #Sys.sleep(1)
-              trd_res <- placeOrder(ts$ts_conn,
-                                    twsEquity(symbol = t,
-                                              currency = c),
-                                    twsOrder(orderId = trd_id,
-                                              action = ac,
-                                              totalQuantity = q,
-                                              orderType = "LMT",
-                                              lmtPrice = p,
-                                              transmit = ts$ts_trade_transmit_switch,
-                                              #goodTillDate = gtd,
-                                              outsideRTH = "1"))
-              Sys.sleep(1)
-            } else {
-              print("Invalid order type. Only Mkt and Lmt are currently supported!")
-            }
-            ts$ts_trade_ids <- c(ts$ts_trade_ids, trd_id)
-            ts$ts_trade_results <- c(ts$ts_trade_results, "Successful")
+            trd_res <- placeOrder(ts$ts_conn,
+                                  twsEquity(symbol = t,
+                                            exch = "SMART",
+                                            primary = "NASDAQ",
+                                            currency = c),
+                                  twsOrder(orderId = trd_id,
+                                           action = ac,
+                                           totalQuantity = q,
+                                           orderType = "MKT",
+                                           transmit = ts$ts_trade_transmit_switch,
+                                           #goodTillDate = gtd,
+                                           outsideRTH = "1"))
+            Sys.sleep(1)
+          } else if (tolower(o) == "lmt") {
+            # Limit order
+            trd_id <- reqIds(ts$ts_conn)
+            trd_res <- placeOrder(ts$ts_conn,
+                                  twsEquity(symbol = t,
+                                            exch = "SMART",
+                                            primary = "NASDAQ",
+                                            currency = c),
+                                  twsOrder(orderId = trd_id,
+                                           action = ac,
+                                           totalQuantity = q,
+                                           orderType = "LMT",
+                                           lmtPrice = p,
+                                           transmit = ts$ts_trade_transmit_switch,
+                                           #goodTillDate = gtd,
+                                           outsideRTH = "1"))
+            Sys.sleep(1)
+          } else {
+            trd_id <- -1
+            print("Invalid order type. Only Mkt and Lmt are currently supported!")
+          }
+          ts$ts_trade_ids <- c(ts$ts_trade_ids, trd_id)
+          ts$ts_trade_results <- c(ts$ts_trade_results, "Successful")
         } else {
+          ts$ts_trade_ids <- c(ts$ts_trade_ids, -1)
           ts$ts_trade_results <- c(ts$ts_trade_results, "Fail")
-		      msg <- paste0("$",single_trade$LocalTicker,
-                      ifelse(bad.buy.order == 1, ": Bad buy order!", ": Bad sell order!"))
-		      ts$ts_last_trade_message <- msg
+          msg <- paste0("$",single_trade$LocalTicker,
+                        ifelse(bad.buy.order == 1, ": Bad buy order!", ": Bad sell order!"))
+          ts$ts_last_trade_message <- msg
           print(msg)
         }
       } else {
-		    msg <- "Error currently only equity is allowed to be trade!"
-		    ts$ts_last_trade_message <- msg
+        ts$ts_trade_ids <- c(ts$ts_trade_ids, -1)
+        ts$ts_trade_results <- c(ts$ts_trade_results, "Fail")
+        msg <- "Error currently only equity is allowed to be trade!"
+        ts$ts_last_trade_message <- msg
         print(msg)
       }
     } else {
+      ts$ts_trade_ids <- c(ts$ts_trade_ids, -1)
+      ts$ts_trade_results <- c(ts$ts_trade_results, "Fail")
       msg <- "Error Trade list structure is invalid."
-	    ts$ts_last_trade_message <- msg
+      ts$ts_last_trade_message <- msg
       print(msg)
     }
   } else {
-	  msg <- "Error connection to IB TWS!"
-	  ts$ts_last_trade_message <- msg
+    ts$ts_trade_ids <- c(ts$ts_trade_ids, -1)
+    ts$ts_trade_results <- c(ts$ts_trade_results, "Fail")
+    msg <- "Error connection to IB TWS!"
+    ts$ts_last_trade_message <- msg
     print(msg)
   }
   return(ts)
@@ -547,7 +571,7 @@ TSCancelTrade.default <- function(ts, trd_id){ return(ts) }
 TSCancelTrade.TradingSession <- function(ts, trd_id){
   if(isConnected(ts$ts_conn)){
     cancelOrder(ts$ts_conn, trd_id)
-    ts$ts_trade_ids <- ts$ts_trade_ids [! ts$ts_trade_ids %in% trd_id]
+    ts$ts_trade_ids <- ts$ts_trade_ids[! ts$ts_trade_ids %in% trd_id]
   } else {
     print("Error connection to IB TWS!")
   }
@@ -557,11 +581,13 @@ TSCancelTrade.TradingSession <- function(ts, trd_id){
 #
 # Cancel all trades
 #
-TSCancelAllTrades <- function(ts) UseMethod("TSCancelAllTrades")
-TSCancelAllTrades.default <- function(ts){ return(ts) }
-TSCancelAllTrades.TradingSession <- function(ts){
+TSCancelAllTrades <- function(ts, prev_session_trade_ids = c()) UseMethod("TSCancelAllTrades")
+TSCancelAllTrades.default <- function(ts, prev_session_trade_ids = c()){ return(ts) }
+TSCancelAllTrades.TradingSession <- function(ts, prev_session_trade_ids = c()){
   if(isConnected(ts$ts_conn)){
-    for(id in ts$ts_trade_ids){
+    all_trades <- c(ts$ts_trade_ids, prev_session_trade_ids)
+    all_valid_trades <- all_trades[all_trades != -1]
+    for(id in all_valid_trades){
       ts <- TSCancelTrade(ts, id)
     }
   } else {
