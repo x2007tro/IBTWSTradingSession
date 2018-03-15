@@ -461,6 +461,7 @@ TSExecuteTrade.TradingSession <- function(ts, single_trade){
             trd_id <- reqIds(ts$ts_conn)
             if(tolower(o) == "mkt"){
               # Market Order
+              #Sys.sleep(1)
               trd_res <- placeOrder(ts$ts_conn,
                                     twsEquity(symbol = t,
                                               currency = c),
@@ -471,8 +472,10 @@ TSExecuteTrade.TradingSession <- function(ts, single_trade){
                                               transmit = ts$ts_trade_transmit_switch,
                                               #goodTillDate = gtd,
                                               outsideRTH = "1"))
+              Sys.sleep(1)
             } else if (tolower(o) == "lmt") {
-            # Limit order
+              # Limit order
+              #Sys.sleep(1)
               trd_res <- placeOrder(ts$ts_conn,
                                     twsEquity(symbol = t,
                                               currency = c),
@@ -484,7 +487,7 @@ TSExecuteTrade.TradingSession <- function(ts, single_trade){
                                               transmit = ts$ts_trade_transmit_switch,
                                               #goodTillDate = gtd,
                                               outsideRTH = "1"))
-            
+              Sys.sleep(1)
             } else {
               print("Invalid order type. Only Mkt and Lmt are currently supported!")
             }
