@@ -43,9 +43,9 @@ TradingSession <- function(c_id,
     }
   } else if (ct == "IBG"){
     if(at == "Live"){
-      my_conn <- ibgConnect(clientId = c_id, host = l_host, port = 7496)
+      my_conn <- ibgConnect(clientId = c_id, host = l_host, port = 4001)
     } else {
-      my_conn <- ibgConnect(clientId = c_id, host = l_host, port = 7497)
+      my_conn <- ibgConnect(clientId = c_id, host = l_host, port = 4002)
     }
   } else {
     res <- "Error connection type!"
