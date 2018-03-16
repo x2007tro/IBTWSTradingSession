@@ -528,16 +528,21 @@ TSExecuteTrade.TradingSession <- function(ts, single_trade){
         #
         # Validate a trade
         #
-        base_curr <- single_trade[,"From"]
-        tgt_curr <- single_trade[,"To"]
-        order_value <- single_trade[,"Quantity"]
-        trade_transmit <- single_trade[,"TradeSwitch"]
-        if(base_curr == "CAD" & tgt_curr == "USD"){
-          if(ca_cash_balance < order_value){
+        tgt_curr <- single_trade[,"TargetCurrency"]
+        tgt_value <- single_trade[,"TargetValue"]
+        
+        if(tgt_curr == "CAD"){
+          side <- "SELL"
+          trade_value <- round(tgt_value/exch_rate, 0)
+          us_cash_order <- trade_value
+          if(us_cash_balance < us_cash_order){
             bad.buy.order = 1
           }
-        } else if (base_curr == "USD" & tgt_curr == "CAD"){
-          if(us_cash_balance < order_value){
+        } else if (tgt_curr == "USD"){
+          side <- "BUY"
+          trade_value <- tgt_value
+          ca_order_value <- exch_rate * trade_value
+          if(ca_cash_balance < ca_order_value){
             bad.buy.order = 1
           }
         } else {
@@ -548,13 +553,14 @@ TSExecuteTrade.TradingSession <- function(ts, single_trade){
         #
         if(bad.buy.order == 0){
           gtd <- format(Sys.Date(),"%Y%m%d 23:59:5900")
-          # Market Order
+          
           trd_id <- reqIds(ts$ts_conn)
           trd_res <- placeOrder(ts$ts_conn,
-                                twsCurrency(paste0(tgt_curr,".",base_curr)),
+                                twsCurrency(symbol = "USD",
+                                            currency = "CAD"),
                                 twsOrder(orderId = trd_id,
-                                         action = "BUY",
-                                         totalQuantity = order_value,
+                                         action = side,
+                                         totalQuantity = trade_value,
                                          orderType = "MKT",
                                          transmit = ts$ts_trade_transmit_switch,
                                          #goodTillDate = gtd,
@@ -562,6 +568,12 @@ TSExecuteTrade.TradingSession <- function(ts, single_trade){
           Sys.sleep(1)
           ts$ts_trade_ids <- c(ts$ts_trade_ids, trd_id)
           ts$ts_trade_results <- c(ts$ts_trade_results, "Successful")
+        } else {
+          ts$ts_trade_ids <- c(ts$ts_trade_ids, -1)
+          ts$ts_trade_results <- c(ts$ts_trade_results, "Fail")
+          msg <- paste0("forex", ifelse(bad.buy.order == 1, ": Bad buy order!", ": Bad sell order!"))
+          ts$ts_last_trade_message <- msg
+          print(msg)
         }
       } else {
         ts$ts_trade_ids <- c(ts$ts_trade_ids, -1)
