@@ -153,7 +153,6 @@ TSRetrievePortHoldings.TradingSession <- function(ts){
                                      numeric(0), numeric(0), numeric(0), numeric(0), numeric(0), numeric(0), as.Date(integer(0)))
       colnames(km.port.holdings) <- def_port_holdings_colnames
     } else {
-      km.port.holdings <- NULL
       res <- lapply(1:length(km.port.holdings.prelim), function(i){
         local <- km.port.holdings.prelim[[i]]$contract$local
         sectype <- km.port.holdings.prelim[[i]]$contract$sectype
@@ -168,7 +167,7 @@ TSRetrievePortHoldings.TradingSession <- function(ts){
         dt <- as.Date(ts$ts_session_start_time)
         
         holding <- data.frame(dt, local, sectype, exc, curr, pos, prc, val, avgcost, unrealizedPNL, realizedPNL, ts$ts_session_start_time)
-        colnames(km.port.holdings) <- def_port_holdings_colnames
+        colnames(holding) <- def_port_holdings_colnames
         return(holding)
       })
       km.port.holdings <- dplyr::bind_rows(res)
