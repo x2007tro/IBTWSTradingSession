@@ -166,7 +166,8 @@ TSRetrievePortHoldings.TradingSession <- function(ts){
         realizedPNL <- km.port.holdings.prelim[[i]]$portfolioValue$realizedPNL
         dt <- as.Date(ts$ts_session_start_time)
         
-        holding <- data.frame(dt, local, sectype, exc, curr, pos, prc, val, avgcost, unrealizedPNL, realizedPNL, ts$ts_session_start_time)
+        holding <- data.frame(dt, local, sectype, exc, curr, pos, prc, val, avgcost, unrealizedPNL, realizedPNL, ts$ts_session_start_time,
+                              stringsAsFactors = FALSE)
         colnames(holding) <- def_port_holdings_colnames
         return(holding)
       })
