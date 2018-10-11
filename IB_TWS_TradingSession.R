@@ -161,6 +161,10 @@ TSRetrievePortHoldings.TradingSession <- function(ts){
         pos <- km.port.holdings.prelim[[i]]$portfolioValue$position
         prc <- km.port.holdings.prelim[[i]]$portfolioValue$marketPrice
         val <- km.port.holdings.prelim[[i]]$portfolioValue$marketValue
+        if(sectype == "OPT"){
+          prc <- prc * 100
+          val <- val * 100
+        }
         avgcost <- km.port.holdings.prelim[[i]]$portfolioValue$averageCost
         unrealizedPNL <- km.port.holdings.prelim[[i]]$portfolioValue$unrealizedPNL
         realizedPNL <- km.port.holdings.prelim[[i]]$portfolioValue$realizedPNL
