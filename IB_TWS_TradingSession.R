@@ -22,12 +22,13 @@ IBTradingSession <- R6::R6Class(
   public = list(
     ##
     # parameters that should not be changed
-    def_port_holdings_colnames = c("Date","LocalTicker","SecurityType","Exchange","Currency","Position","MktPrc","MktVal","AvgCost",
-                                   "UnrealizedPNL","RealizedPNL","TimeStamp"),
+    def_port_holdings_colnames = c("Date","LocalTicker","Right","Expiry","Strike","SecurityType","Exchange","Currency","Position",
+                                   "MktPrc","MktVal","AvgCost","UnrealizedPNL","RealizedPNL","TimeStamp"),
     def_port_info_colnames = c("Date", "Value", "Currency", "TimeStamp"),
     def_watchlist_colnames = c("LocalTicker","Currency","SecurityType","Comments"),
-    def_prelimtradelist_colnames = c("LocalTicker","Action","Quantity","OrderType","LimitPrice","SecurityType","Currency","TradeSwitch"),
-    def_fnltradelist_colnames = c("LocalTicker","Action","Quantity","OrderType","AdjustedLimitPrice","LastTradePrice","SecurityType",
+    def_prelimtradelist_colnames = c("LocalTicker","Right","Expiry","Strike","Exchange","Action","Quantity","OrderType","LimitPrice",
+                                     "SecurityType","Currency","TradeSwitch"),
+    def_fnltradelist_colnames = c("LocalTicker","Right","Expiry","Strike","Exchange","Action","Quantity","OrderType","AdjustedLimitPrice","LastTradePrice","SecurityType",
                                   "Currency","Commission","ValidTicker"),
     
     ##
@@ -36,8 +37,16 @@ IBTradingSession <- R6::R6Class(
     ts_conn = NULL,
     ts_session_start_time = NULL,
     ts_server_version = NULL,
-    ts_us_equity_comm = 0.005,                   # US equity trade commission per share
-    ts_ca_equity_comm = 0.01,                    # CA equity trade commission per share
+    ts_comm = list(
+      STK = list(
+        USD = 0.005,
+        CAD = 0.01
+      ),
+      OPT = list(
+        USD = 0.70,
+        CAD = 1.25
+      )
+    ),
     ts_port_holdings = NULL,
     ts_port_info = NULL,
     ts_ca_net_liquidation = 0,
@@ -58,6 +67,7 @@ IBTradingSession <- R6::R6Class(
     ts_last_trade_message = NULL,
     ts_trade_gooduntildate = NULL,
     ts_db_obj = NULL,
+    ts_app_status = app_sta,
     
     ##
     # initialize function
@@ -92,8 +102,6 @@ IBTradingSession <- R6::R6Class(
       self$ts_conn <- my_conn
       self$ts_session_start_time <- reqCurrentTime(my_conn)
       self$ts_server_version <- serverVersion(my_conn)
-      self$ts_us_equity_comm <- 0.005                   # US equity trade commission per share
-      self$ts_ca_equity_comm <- 0.01                    # CA equity trade commission per share
       self$ts_port_holdings <- NULL
       self$ts_port_info <- NULL
       self$ts_ca_net_liquidation <- 0
@@ -172,8 +180,9 @@ IBTradingSession <- R6::R6Class(
     
     ##
     # Add error message
-    TSLogError = function(msg, tp, loc){
+    TSLogError = function(app_sta, msg, tp, loc){
       msg <- data.frame(
+        ApplicationStatus = app_sta,
         Message = msg,
         Type = tp,
         Location = loc,
@@ -211,9 +220,12 @@ IBTradingSession <- R6::R6Class(
           colnames(km.port.holdings) <- self$def_port_holdings_colnames
         } else {
           res <- lapply(1:length(km.port.holdings.prelim), function(i){
-            local <- km.port.holdings.prelim[[i]]$contract$local
+            symbol <- km.port.holdings.prelim[[i]]$contract$symbol
+            cont_right <- km.port.holdings.prelim[[i]]$contract$right
+            expiry <- km.port.holdings.prelim[[i]]$contract$expiry
+            strike <- km.port.holdings.prelim[[i]]$contract$strike
             sectype <- km.port.holdings.prelim[[i]]$contract$sectype
-            exc <- km.port.holdings.prelim[[i]]$contract$exch
+            exc <- km.port.holdings.prelim[[i]]$contract$primary
             curr <- km.port.holdings.prelim[[i]]$contract$currency
             pos <- km.port.holdings.prelim[[i]]$portfolioValue$position
             prc <- km.port.holdings.prelim[[i]]$portfolioValue$marketPrice
@@ -227,7 +239,7 @@ IBTradingSession <- R6::R6Class(
             realizedPNL <- km.port.holdings.prelim[[i]]$portfolioValue$realizedPNL
             dt <- as.Date(self$ts_session_start_time)
             
-            holding <- data.frame(dt, local, sectype, exc, curr, pos, prc, val, avgcost, unrealizedPNL, realizedPNL, self$ts_session_start_time,
+            holding <- data.frame(dt, symbol, cont_right, expiry, strike, sectype, exc, curr, pos, prc, val, avgcost, unrealizedPNL, realizedPNL, self$ts_session_start_time,
                                   stringsAsFactors = FALSE)
             colnames(holding) <- self$def_port_holdings_colnames
             return(holding)
@@ -241,7 +253,7 @@ IBTradingSession <- R6::R6Class(
         # add code to enter port holdings data into database
         
       } else {
-        self$TSLogError(paste0("Connection to IB is not active."), "Error", "TSRetrievePortHoldings")
+        self$TSLogError(self$ts_app_status, paste0("Connection to IB is not active."), "Error", "TSRetrievePortHoldings")
       }
       
       invisible(self)
@@ -306,7 +318,7 @@ IBTradingSession <- R6::R6Class(
             cash.balance.rev <- data.frame(c(cal.cash.us, cash.ca),
                                            c("USD","CAD"))
           } else {
-            self$TSLogError(paste0("Multiple currencies exist!"), "Warning", "TSRetrievePortInfo")
+            self$TSLogError(self$ts_app_status, paste0("Multiple currencies exist!"), "Warning", "TSRetrievePortInfo")
           }
           rownames(cash.balance.rev) <- c("CashBalanceUS","CashBalanceCA")
           colnames(cash.balance.rev) <- c("Value","Currency")
@@ -337,10 +349,10 @@ IBTradingSession <- R6::R6Class(
           # Add code to add port info to database
           
         } else {
-          self$TSLogError(paste0("Currency not as expected!"), "Warning", "TSRetrievePortInfo")
+          self$TSLogError(self$ts_app_status, paste0("Currency not as expected!"), "Warning", "TSRetrievePortInfo")
         }
       } else {
-        self$TSLogError(paste0("Connection to IB is not active."), "Error", "TSRetrievePortInfo")
+        self$TSLogError(self$ts_app_status, paste0("Connection to IB is not active."), "Error", "TSRetrievePortInfo")
       }
       
       invisible(self)
@@ -353,16 +365,94 @@ IBTradingSession <- R6::R6Class(
     },
     
     ##
+    # get contract info
+    TSProcessContract = function(contract){
+      #
+      # currently, only support equity and option
+      #
+      tmp <- lapply(1:length(contract), function(i, opt1){
+        item <- opt1[[i]]
+        res <- data.frame(
+          CompanyName = item$longName,
+          Industry = item$industry,
+          Category = item$category,
+          SubCategory = item$subcategory,
+          TimeZone = item$timeZoneId,
+          ReqExchange = item$contract$exch,
+          PriExchange = item$contract$primary,
+          IBSymbol = item$contract$symbol,
+          LocalSymbol = item$contract$local,
+          SecurityType = item$contract$sectype,
+          ContractRight = item$contract$right,
+          Expiry = item$contract$expiry,
+          Strike = item$contract$strike,
+          Currency = item$contract$currency,
+          Multiplier = item$contract$multiplier,
+          stringsAsFactors = FALSE
+        )
+        return(res)
+      }, contract)
+      return(tmp %>% dplyr::bind_rows())
+    },
+    
+    ##
+    # generate contract and request contract details
+    TSGetContractDetails = function(sym, cur = "", sec_typ = c("equity", "option")){
+      st <- sec_typ
+      
+      if(isConnected(self$ts_conn)){
+        cont <- NULL
+        if(st == "equity"){
+          cont <- twsEquity(
+            local = "",
+            symbol = sym,
+            exch = "SMART",
+            currency = cur
+          )
+        } else if (st == "option"){
+          cont <- twsOPT(
+            local = "",
+            symbol = sym,
+            right = "",    # both call and put
+            expiry = "",
+            strike = "",
+            exch = "SMART",
+            primary = "",
+            currency = cur
+          )
+        } else {
+          self$TSLogError(self$ts_app_status, paste0("The security type ", ct, " you specified is not supported!"), "Error", "TSGetContractDetails")
+        }
+        
+        if(!is.null(cont)){
+          cont_info <- IBrokers::reqContractDetails(self$ts_conn, cont)
+          if(length(cont_info) != 0){
+            res <- self$TSProcessContract(cont_info)
+          } else {
+            res <- data.frame(Message = "Contract details cannot be retrieved due to invalid contract parameters!", stringsAsFactors = FALSE)
+          }
+        } else {
+          res <- data.frame(Message = "Contract details cannot be retrieved due to invalid security type!", stringsAsFactors = FALSE)
+        }
+      } else {
+        self$TSLogError(self$ts_app_status, paste0("Connection to IB is not active."), "Error", "TSGetContractDetails")
+        res <- data.frame(Message = "Contract details cannot be retrieved due to inactive IB connection!", stringsAsFactors = FALSE)
+      }
+      
+      return(res)
+    },
+    
+    ##
     # Set watchlist
     TSSetWatchlist = function(ws){
       if(isConnected(self$ts_conn)){
         if(identical(colnames(ws), self$def_watchlist_colnames)){
           self$ts_watchlist <- ws
         } else {
-          self$TSLogError(paste0("User entered watchlist has unexpected structure!"), "Error", "TSSetWatchlist")
+          self$TSLogError(self$ts_app_status, paste0("User entered watchlist has unexpected structure!"), "Error", "TSSetWatchlist")
         }
       } else {
-        self$TSLogError(paste0("Connection to IB is not active."), "Error", "TSSetWatchlist")
+        self$TSLogError(self$ts_app_status, paste0("Connection to IB is not active."), "Error", "TSSetWatchlist")
       }
       invisible(self)
     },
@@ -375,10 +465,10 @@ IBTradingSession <- R6::R6Class(
         if(identical(colnames(man_trd_df), self$def_prelimtradelist_colnames)){
           self$ts_prelimTradelist <- man_trd_df
         } else{
-          self$TSLogError(paste0("User entered tradelist has unexpected structure!"), "Error", "TSSetPrelimTradeList")
+          self$TSLogError(self$ts_app_status, paste0("User entered tradelist has unexpected structure!"), "Error", "TSSetPrelimTradeList")
         }
       } else {
-        self$TSLogError(paste0("Connection to IB is not active."), "Error", "TSSetPrelimTradeList")
+        self$TSLogError(self$ts_app_status, paste0("Connection to IB is not active."), "Error", "TSSetPrelimTradeList")
       }
       invisible(self)
     },
@@ -403,12 +493,11 @@ IBTradingSession <- R6::R6Class(
             #
             # Update commission
             #
-            if(man_trd_df[i,"Currency"]== "USD"){
-              man_trd_df[i,"Commission"] <- max(1, self$ts_us_equity_comm*man_trd_df[i,"Quantity"], na.rm = TRUE)
-            } else if(man_trd_df[i,"Currency"]== "CAD") {
-              man_trd_df[i,"Commission"] <- max(1, self$ts_ca_equity_comm*man_trd_df[i,"Quantity"], na.rm = TRUE)
+            if(man_trd_df[i,"Currency"] == "USD" | man_trd_df[i,"Currency"] == "CAD"){
+              base_comm <- self$ts_comm[[man_trd_df[i,"SecurityType"]]][[man_trd_df[i,"Currency"]]]
+              man_trd_df[i,"Commission"] <- max(1, base_comm*man_trd_df[i,"Quantity"], na.rm = TRUE)
             } else {
-              self$TSLogError(paste0("Non-north america trade exist!"), "Warning", "TSGenFnlTradeList")
+              self$TSLogError(self$ts_app_status, paste0("Non-north america trade exist!"), "Warning", "TSGenFnlTradeList")
             }
             
             #
@@ -433,7 +522,7 @@ IBTradingSession <- R6::R6Class(
           self$ts_fnlTradelist <- man_trd_df[,self$def_fnltradelist_colnames]
         }
       } else {
-        self$TSLogError(paste0("Connection to IB is not active."), "Error", "TSGenFnlTradeList")
+        self$TSLogError(self$ts_app_status, paste0("Connection to IB is not active."), "Error", "TSGenFnlTradeList")
       }
       invisible(self)
     },
@@ -453,13 +542,13 @@ IBTradingSession <- R6::R6Class(
         ca_cash_balance <- self$ts_ca_cash_balance
         exch_rate <- self$ts_exchange_rate
         
-        if(identical(colnames(single_trade),self$def_fnltradelist_colnames) | tolower(single_trade[,"SecurityType"]) == "forex"){
+        if(identical(colnames(single_trade), self$def_fnltradelist_colnames) | tolower(single_trade[,"SecurityType"]) == "forex"){
           #
           # Validate and execute a single trade
           #
           bad.sell.order <- 0
           bad.buy.order <- 0
-          if(tolower(single_trade[,"SecurityType"]) == "stk"){
+          if(tolower(single_trade[,"SecurityType"]) == "stk" | tolower(single_trade[,"SecurityType"]) == "opt"){
             
             #
             # Validate a trade
@@ -502,7 +591,7 @@ IBTradingSession <- R6::R6Class(
                 bad.buy.order <- 1
               }
             } else {
-              self$TSLogError(paste0("Trade type ", single_trade$Action, " is not valid!"), "Error", "TSExecuteTrade")
+              self$TSLogError(self$ts_app_status, paste0("Trade type ", single_trade$Action, " is not valid!"), "Error", "TSExecuteTrade")
             }
             
             #
@@ -510,25 +599,46 @@ IBTradingSession <- R6::R6Class(
             #
             if(bad.buy.order == 0 & bad.sell.order == 0 & single_trade$ValidTicker == TRUE){
               t <- single_trade$LocalTicker
+              ri <- single_trade$Right
+              ex <- single_trade$Expiry
+              stk <- single_trade$Strike
+              pe <- single_trade$Exchange
               ac <- single_trade$Action
               q <- single_trade$Quantity
               o <- single_trade$OrderType
+              sect <- single_trade$SecurityType
               p <- single_trade$AdjustedLimitPrice
               c <- single_trade$Currency
-              if(c == "USD"){
-                pe <- "NASDAQ"
-              } else if(c == 'CAD') {
-                pe <- "TSE"
-              }
+
               gtd <- format(Sys.Date(),"%Y%m%d 23:59:5900")
+              
+              ##
+              # make contract for stock and option
+              if(tolower(sect) == "stk"){
+                cont <- IBrokers::twsEquity(
+                  symbol = t,
+                  exch = "SMART",
+                  primary = pe,
+                  currency = c
+                )
+              } else {
+                cont <- IBrokers::twsOPT(
+                  local = "",
+                  symbol = t,
+                  right = ri,    # both call and put
+                  expiry = ex,
+                  strike = stk,
+                  exch = "SMART",
+                  primary = "",
+                  currency = c
+                )
+              }
+              
               if(tolower(o) == "mkt"){
                 # Market Order
                 trd_id <- reqIds(self$ts_conn)
                 trd_res <- placeOrder(self$ts_conn,
-                                      twsEquity(symbol = t,
-                                                exch = "SMART",
-                                                primary = pe,
-                                                currency = c),
+                                      cont,
                                       twsOrder(orderId = trd_id,
                                                action = ac,
                                                totalQuantity = q,
@@ -541,10 +651,7 @@ IBTradingSession <- R6::R6Class(
                 # Limit order
                 trd_id <- reqIds(self$ts_conn)
                 trd_res <- placeOrder(self$ts_conn,
-                                      twsEquity(symbol = t,
-                                                exch = "SMART",
-                                                primary = pe,
-                                                currency = c),
+                                      cont,
                                       twsOrder(orderId = trd_id,
                                                action = ac,
                                                totalQuantity = q,
@@ -556,16 +663,17 @@ IBTradingSession <- R6::R6Class(
                 Sys.sleep(1)
               } else {
                 trd_id <- -1
-                self$TSLogError(paste0("Trade type ", o, " is not valid for trade #", trd_id,"!"), "Error", "TSExecuteTrade")
+                self$TSLogError(self$ts_app_status, paste0("Trade type ", o, " is not valid for trade #", trd_id,"!"), "Error", "TSExecuteTrade")
               }
               self$ts_trade_ids <- c(self$ts_trade_ids, trd_id)
               self$ts_trade_results <- c(self$ts_trade_results, "Successful")
-            } else {
+            } else {  
+              # order validation failed
               self$ts_trade_ids <- c(self$ts_trade_ids, -1)
               self$ts_trade_results <- c(self$ts_trade_results, "Fail")
               msg <- paste0("$",single_trade$LocalTicker,
                             ifelse(bad.buy.order == 1, ": Bad buy order!", ": Bad sell order!"))
-              self$TSLogError(msg, "Error", "TSExecuteTrade")
+              self$TSLogError(self$ts_app_status, msg, "Error", "TSExecuteTrade")
               self$ts_last_trade_message <- msg
               print(msg)
             }
@@ -591,7 +699,7 @@ IBTradingSession <- R6::R6Class(
                 bad.buy.order = 1
               }
             } else {
-              self$TSLogError(paste0("Error only USD and CAD are allowed to traded."), "Error", "TSExecuteTrade")
+              self$TSLogError(self$ts_app_status, paste0("Error only USD and CAD are allowed to traded."), "Error", "TSExecuteTrade")
             }
             #
             # Execute the trade
@@ -617,7 +725,7 @@ IBTradingSession <- R6::R6Class(
               self$ts_trade_ids <- c(self$ts_trade_ids, -1)
               self$ts_trade_results <- c(self$ts_trade_results, "Fail")
               msg <- paste0("forex", ifelse(bad.buy.order == 1, ": Bad buy order!", ": Bad sell order!"))
-              self$TSLogError(msg, "Error", "TSExecuteTrade")
+              self$TSLogError(self$ts_app_status, msg, "Error", "TSExecuteTrade")
               self$ts_last_trade_message <- msg
               print(msg)
             }
@@ -625,15 +733,16 @@ IBTradingSession <- R6::R6Class(
             self$ts_trade_ids <- c(self$ts_trade_ids, -1)
             self$ts_trade_results <- c(self$ts_trade_results, "Fail")
             msg <- "Error currently only equity and currenct are allowed to be traded!"
-            self$TSLogError(msg, "Error", "TSExecuteTrade")
+            self$TSLogError(self$ts_app_status, msg, "Error", "TSExecuteTrade")
             self$ts_last_trade_message <- msg
             print(msg)
           }
+          
         } else {
           self$ts_trade_ids <- c(self$ts_trade_ids, -1)
           self$ts_trade_results <- c(self$ts_trade_results, "Fail")
           msg <- "Error Trade list structure is invalid."
-          self$TSLogError(msg, "Error", "TSExecuteTrade")
+          self$TSLogError(self$ts_app_status, msg, "Error", "TSExecuteTrade")
           self$ts_last_trade_message <- msg
           print(msg)
         }
@@ -641,7 +750,7 @@ IBTradingSession <- R6::R6Class(
         self$ts_trade_ids <- c(self$ts_trade_ids, -1)
         self$ts_trade_results <- c(self$ts_trade_results, "Fail")
         msg <- "Connection to IB is not active."
-        self$TSLogError(msg, "Error", "TSExecuteTrade")
+        self$TSLogError(self$ts_app_status, msg, "Error", "TSExecuteTrade")
         self$ts_last_trade_message <- msg
         print(msg)
       }
@@ -658,22 +767,22 @@ IBTradingSession <- R6::R6Class(
           }
           self$TSGenTradeResults()
         } else {
-          self$TSLogError(paste0("Error trade list is empty!"), "Error", "TSExecuteAllTrades")
+          self$TSLogError(self$ts_app_status, paste0("Error trade list is empty!"), "Error", "TSExecuteAllTrades")
         }
       } else {
-        self$TSLogError(paste0("Connection to IB is not active."), "Error", "TSExecuteAllTrades")
+        self$TSLogError(self$ts_app_status, paste0("Connection to IB is not active."), "Error", "TSExecuteAllTrades")
       }
       invisible(self)
     },
     
     ##
     # Cancel single trade
-    TSCancelTrade =  function(trd_id){
+    TSCancelTrade = function(trd_id){
       if(isConnected(self$ts_conn)){
         cancelOrder(self$ts_conn, trd_id)
         self$ts_trade_ids <- self$ts_trade_ids[! self$ts_trade_ids %in% trd_id]
       } else {
-        self$TSLogError(paste0("Connection to IB is not active."), "Error", "TSCancelTrade")
+        self$TSLogError(self$ts_app_status, paste0("Connection to IB is not active."), "Error", "TSCancelTrade")
       }
       invisible(self)
     },
@@ -685,10 +794,10 @@ IBTradingSession <- R6::R6Class(
         all_trades <- self$ts_trade_ids
         all_valid_trades <- all_trades[all_trades != -1]
         for(id in all_valid_trades){
-          self$TSCancelTrade(ts, id)
+          self$TSCancelTrade(id)
         }
       } else {
-        self$TSLogError(paste0("Connection to IB is not active."), "Error", "TSCancelAllTrades")
+        self$TSLogError(self$ts_app_status, paste0("Connection to IB is not active."), "Error", "TSCancelAllTrades")
       }
       invisible(self)
     },
@@ -699,7 +808,7 @@ IBTradingSession <- R6::R6Class(
       if(isConnected(self$ts_conn)){
         self$ts_trade_transmit_switch <- flg
       } else {
-        self$TSLogError(paste0("Connection to IB is not active."), "Error", "TSSetTransmit")
+        self$TSLogError(self$ts_app_status, paste0("Connection to IB is not active."), "Error", "TSSetTransmit")
       }
       invisible(self)
     },
@@ -711,10 +820,10 @@ IBTradingSession <- R6::R6Class(
         if(class(dt) == "date"){
           self$ts_trade_gooduntildate <- dt
         } else {
-          self$TSLogError(paste0("Invalid date ", dt, " to be set."), "Error", "TSSetGoodUntil")
+          self$TSLogError(self$ts_app_status, paste0("Invalid date ", dt, " to be set."), "Error", "TSSetGoodUntil")
         }
       } else {
-        self$TSLogError(paste0("Connection to IB is not active."), "Error", "TSSetGoodUntil")
+        self$TSLogError(self$ts_app_status, paste0("Connection to IB is not active."), "Error", "TSSetGoodUntil")
       }
       invisible(self)
     },
@@ -730,7 +839,7 @@ IBTradingSession <- R6::R6Class(
         temp_df$TradeResult <- self$ts_trade_results[(act_trd_cnt-exp_trd_cnt+1):act_trd_cnt]
         self$ts_trade_summary <- temp_df
       } else {
-        self$TSLogError(paste0("Connection to IB is not active."), "Error", "TSGenTradeResults")
+        self$TSLogError(self$ts_app_status, paste0("Connection to IB is not active."), "Error", "TSGenTradeResults")
       }
       invisible(self)
     },
@@ -752,7 +861,7 @@ IBTradingSession <- R6::R6Class(
       } else {
         res.msg <- paste("Trading session ", self$ts_client_id, " is closed.", sep="")
       }
-      self$TSLogError(res.msg, "Info", "TSCloseTradingSession")
+      self$TSLogError(self$ts_app_status, res.msg, "Info", "TSCloseTradingSession")
     }
     
     ##
