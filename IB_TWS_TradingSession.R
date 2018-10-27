@@ -230,7 +230,7 @@ IBTradingSession <- R6::R6Class(
             pos <- km.port.holdings.prelim[[i]]$portfolioValue$position
             prc <- km.port.holdings.prelim[[i]]$portfolioValue$marketPrice
             val <- km.port.holdings.prelim[[i]]$portfolioValue$marketValue
-            if(sectype == "OPT"){
+            if(sectype == "OPT" | sectype == "FUT"){
               prc <- prc * 100
               val <- val * 100
             }
@@ -397,13 +397,20 @@ IBTradingSession <- R6::R6Class(
     
     ##
     # generate contract and request contract details
-    TSGetContractDetails = function(sym, cur = "", sec_typ = c("equity", "option")){
+    TSGetContractDetails = function(sym, cur = "", sec_typ = c("equity", "option", "forex", "future")){
       st <- sec_typ
       
       if(isConnected(self$ts_conn)){
         cont <- NULL
-        if(st == "equity"){
-          cont <- twsEquity(
+        if(st == "forex"){
+          cont <- twsCurrency(
+            local = "",
+            symbol = sym,
+            exch = "",
+            currency = "CAD"
+          )
+        } else if (st == "equity"){
+          cont <- twsSTK(
             local = "",
             symbol = sym,
             exch = "SMART",
@@ -417,6 +424,16 @@ IBTradingSession <- R6::R6Class(
             expiry = "",
             strike = "",
             exch = "SMART",
+            primary = "",
+            currency = cur
+          )
+        } else if (st == "future"){
+          cont <- twsFUT(
+            local = "",
+            symbol = sym,
+            right = "",    
+            expiry = "",
+            exch = "ONE",
             primary = "",
             currency = cur
           )
@@ -542,13 +559,15 @@ IBTradingSession <- R6::R6Class(
         ca_cash_balance <- self$ts_ca_cash_balance
         exch_rate <- self$ts_exchange_rate
         
-        if(identical(colnames(single_trade), self$def_fnltradelist_colnames) | tolower(single_trade[,"SecurityType"]) == "forex"){
+        if(identical(colnames(single_trade), self$def_fnltradelist_colnames)){
           #
           # Validate and execute a single trade
           #
           bad.sell.order <- 0
           bad.buy.order <- 0
-          if(tolower(single_trade[,"SecurityType"]) == "stk" | tolower(single_trade[,"SecurityType"]) == "opt"){
+          if(tolower(single_trade[,"SecurityType"]) == "stk" | 
+             tolower(single_trade[,"SecurityType"]) == "opt" | 
+             tolower(single_trade[,"SecurityType"]) == "fut" ){
             
             #
             # Validate a trade
@@ -615,21 +634,28 @@ IBTradingSession <- R6::R6Class(
               ##
               # make contract for stock and option
               if(tolower(sect) == "stk"){
-                cont <- IBrokers::twsEquity(
+                cont <- IBrokers::twsSTK(
                   symbol = t,
                   exch = "SMART",
                   primary = pe,
                   currency = c
                 )
-              } else {
+              } else if (tolower(sect) == "opt") {
                 cont <- IBrokers::twsOPT(
-                  local = "",
+                  local = "",    # necessary for option 
                   symbol = t,
                   right = ri,    # both call and put
                   expiry = ex,
                   strike = stk,
                   exch = "SMART",
                   primary = "",
+                  currency = c
+                )
+              } else if (tolower(sect) == "fut") {
+                cont <- IBrokers::twsFUT(
+                  symbol = t,
+                  expiry = ex,
+                  exch = "ONE",
                   currency = c
                 )
               }
@@ -681,8 +707,10 @@ IBTradingSession <- R6::R6Class(
             #
             # Validate a trade
             #
-            tgt_curr <- single_trade[,"TargetCurrency"]
-            tgt_value <- single_trade[,"TargetValue"]
+            tgt_curr <- single_trade[,"LocalTicker"]
+            tgt_value <- single_trade[,"Quantity"]
+            exch <- "IDEALPRO"
+            quoted_curr <- single_trade[,"Currency"]
             
             if(tgt_curr == "CAD"){
               side <- "SELL"
@@ -691,6 +719,11 @@ IBTradingSession <- R6::R6Class(
               if(us_cash_balance < us_cash_order){
                 bad.buy.order = 1
               }
+              forex_cont <- twsCurrency(
+                symbol = quoted_curr,
+                exch = exch,
+                currency = tgt_curr
+              )
             } else if (tgt_curr == "USD"){
               side <- "BUY"
               trade_value <- tgt_value
@@ -698,6 +731,11 @@ IBTradingSession <- R6::R6Class(
               if(ca_cash_balance < ca_order_value){
                 bad.buy.order = 1
               }
+              forex_cont <- twsCurrency(
+                symbol = tgt_curr,
+                exch = exch,
+                currency = quoted_curr
+              )
             } else {
               self$TSLogError(self$ts_app_status, paste0("Error only USD and CAD are allowed to traded."), "Error", "TSExecuteTrade")
             }
@@ -709,8 +747,7 @@ IBTradingSession <- R6::R6Class(
               
               trd_id <- reqIds(self$ts_conn)
               trd_res <- placeOrder(self$ts_conn,
-                                    twsCurrency(symbol = "USD",
-                                                currency = "CAD"),
+                                    forex_cont,
                                     twsOrder(orderId = trd_id,
                                              action = side,
                                              totalQuantity = trade_value,
