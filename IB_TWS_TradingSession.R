@@ -10,6 +10,7 @@
 #
 libraries <- c("IBrokers","quantmod","R6")
 lapply(libraries, function(lib){ library(lib, character.only=TRUE) })
+options(scipen = 999)
 
 ##
 # R6 class of trading session
@@ -22,13 +23,15 @@ IBTradingSession <- R6::R6Class(
   public = list(
     ##
     # parameters that should not be changed
-    def_port_holdings_colnames = c("Date","LocalTicker","Right","Expiry","Strike","SecurityType","Exchange","Currency","Position",
-                                   "MktPrc","MktVal","AvgCost","UnrealizedPNL","RealizedPNL","TimeStamp"),
-    def_port_info_colnames = c("Date", "Value", "Currency", "TimeStamp"),
-    def_watchlist_colnames = c("LocalTicker","Currency","SecurityType","Comments"),
-    def_prelimtradelist_colnames = c("LocalTicker","Right","Expiry","Strike","Exchange","Action","Quantity","OrderType","LimitPrice",
-                                     "SecurityType","Currency","TradeSwitch"),
-    def_fnltradelist_colnames = c("LocalTicker","Right","Expiry","Strike","Exchange","Action","Quantity","OrderType","AdjustedLimitPrice","LastTradePrice","SecurityType",
+    def_port_holdings_remain = c("symbol","right","expiry","strike","sectype","primary","currency","position",
+                                 "averageCost","marketPrice","marketValue","unrealizedPNL","realizedPNL"),
+    def_port_holdings_colnames = c("Market Date","Symbol","Right","Expiry","Strike","Security Type","Exchange","Currency","Position",
+                                   "Cost","MktPrc","MktVal","UnrealizedPNL","RealizedPNL"),
+    def_port_info_colnames = c("Date", "Metric", "Value", "Currency"),
+    def_watchlist_colnames = c("Symbol","Currency","Security Type","Comments"),
+    def_prelimtradelist_colnames = c("Symbol","Right","Expiry","Strike","Exchange","Action","Quantity","OrderType","LimitPrice",
+                                     "Security Type","Currency","TradeSwitch"),
+    def_fnltradelist_colnames = c("Symbol","Right","Expiry","Strike","Exchange","Action","Quantity","OrderType","AdjustedLimitPrice","LastTradePrice","Security Type",
                                   "Currency","Commission","ValidTicker"),
     
     ##
@@ -40,23 +43,27 @@ IBTradingSession <- R6::R6Class(
     ts_comm = list(
       STK = list(
         USD = 0.005,
-        CAD = 0.01
+        CAD = 0.01,
+        AUD = 0,
+        EUR = 0,
+        GBP = 0,
+        NZD = 0
       ),
       OPT = list(
         USD = 0.70,
-        CAD = 1.25
+        CAD = 1.25,
+        AUD = 0,
+        EUR = 0,
+        GBP = 0,
+        NZD = 0
       )
     ),
-    ts_port_holdings = NULL,
+    ts_port_holdings_nonforex = NULL,
+    ts_port_holdings_forex = NULL,
     ts_port_info = NULL,
-    ts_ca_net_liquidation = 0,
-    ts_ca_gross_position_value = 0,
-    ts_ca_equity_with_loan_value = 0,
-    ts_ca_total_cash_value = 0,
-    ts_us_cash_balance = 0,
-    ts_ca_cash_balance = 0,
-    ts_ca_accrued_divdend = 0,
-    ts_exchange_rate = 0,
+    ts_cash_balance = NULL,
+    ts_acc_recon = NULL,
+    ts_tradable_currency = tradable_curr,   # from global
     ts_watchlist = NULL,
     ts_prelimTradelist = NULL,
     ts_fnlTradelist = NULL,
@@ -66,8 +73,8 @@ IBTradingSession <- R6::R6Class(
     ts_trade_transmit_switch = FALSE,
     ts_last_trade_message = NULL,
     ts_trade_gooduntildate = NULL,
-    ts_db_obj = NULL,
-    ts_app_status = app_sta,
+    ts_db_obj = db_obj,   # from global
+    ts_app_status = app_sta,   # from global
     
     ##
     # initialize function
@@ -102,35 +109,30 @@ IBTradingSession <- R6::R6Class(
       self$ts_conn <- my_conn
       self$ts_session_start_time <- reqCurrentTime(my_conn)
       self$ts_server_version <- serverVersion(my_conn)
-      self$ts_port_holdings <- NULL
+      self$ts_port_holdings_nonforex <- NULL
+      self$ts_port_holdings_forex <- NULL
       self$ts_port_info <- NULL
-      self$ts_ca_net_liquidation <- 0
-      self$ts_ca_gross_position_value <- 0
-      self$ts_ca_equity_with_loan_value <- 0
-      self$ts_ca_total_cash_value <- 0
-      self$ts_us_cash_balance <- 0
-      self$ts_ca_cash_balance <- 0
-      self$ts_ca_accrued_divdend <- 0
-      self$ts_exchange_rate <- 0
+      self$ts_cash_balance <- NULL
+      self$ts_acc_recon <- NULL
       self$ts_watchlist <- data.frame(
-        LocalTicker = character(0),
+        Symbol = character(0),
         Currency = character(0),
-        SecurityType = character(0),
+        `Security Type` = character(0),
         Comments = character(0),
         stringsAsFactors = FALSE
       )
       self$ts_prelimTradelist <- data.frame(
-        LocalTicker = character(0),
+        Symbol = character(0),
         Action = character(0),
         Quantity = numeric(0),
         OrderType = character(0),
         LimitPrice = numeric(0),
-        SecurityType = character(0),
+        `Security Type` = character(0),
         Currency = character(0),
         stringsAsFactors = FALSE
       )
       self$ts_fnlTradelist <- data.frame(
-        LocalTicker = character(0),
+        Symbol = character(0),
         Action = character(0),
         Quantity = numeric(0),
         OrderType = character(0),
@@ -145,12 +147,6 @@ IBTradingSession <- R6::R6Class(
       self$ts_trade_transmit_switch <- FALSE
       self$ts_last_trade_message <- NULL
       self$ts_trade_gooduntildate <- as.Date(reqCurrentTime(my_conn))
-      self$ts_db_obj <- list(
-        srv = "192.168.2.120,3773",
-        dbn = "WebappAdmin",
-        id = "kmin",
-        pwd = "yuheng"
-      )
       
     },
     
@@ -179,6 +175,15 @@ IBTradingSession <- R6::R6Class(
     },
     
     ##
+    # Read a table from sql server db
+    TSReadDataFromSS = function(db_obj, tbl_name){
+      conn <- self$TSConnSqlServer(db_obj)
+      df <- DBI::dbReadTable(conn, tbl_name)
+      DBI::dbDisconnect(conn) 				  
+      return(df)
+    },
+    
+    ##
     # Add error message
     TSLogError = function(app_sta, msg, tp, loc){
       msg <- data.frame(
@@ -204,164 +209,170 @@ IBTradingSession <- R6::R6Class(
     },
     
     ##
-    # RetrievePortHoldings
-    TSUpdatePortHoldings = function(){
-      if(isConnected(self$ts_conn)){
-        km.port.prelim <- reqAccountUpdates(self$ts_conn)
+    # Process account balance
+    TSProcessAccBal = function(acc_bal){
+      ##
+      # convert info from list to data.frame
+      res <- lapply(1:length(acc_bal), function(i, acc_bal1){
+        tmp <- acc_bal1[[i]]
         
-        #
-        # Retrieve portfolio holdings data
-        #
-        km.port.holdings.prelim <- km.port.prelim[[2]]
+        tmp_df <- data.frame(
+          Metric = names(acc_bal1)[i],
+          Value = as.numeric(tmp['value']),
+          Currency = tmp['currency'],
+          stringsAsFactors = FALSE
+        ) %>% dplyr::filter(!is.na(Value))
+        return(tmp_df)
+      }, acc_bal)
+      res1 <- dplyr::bind_rows(res)
+      return(res1)
+    },
+    
+    ##
+    # Process holding
+    TSProcessHolding = function(holding){
+      ##
+      # convert info from list to data.frame
+      res <- lapply(1:length(holding), function(i, holding1){
+        tmp <- holding1[[i]]
+        contract <- tmp$contract
+        pv <- tmp$portfolioValue
         
-        if(length(km.port.holdings.prelim) == 0){
-          km.port.holdings <- data.frame(as.Date(integer(0)), character(0), character(0), character(0), character(0), 
-                                         numeric(0), numeric(0), numeric(0), numeric(0), numeric(0), numeric(0), as.Date(integer(0)))
-          colnames(km.port.holdings) <- self$def_port_holdings_colnames
-        } else {
-          res <- lapply(1:length(km.port.holdings.prelim), function(i){
-            symbol <- km.port.holdings.prelim[[i]]$contract$symbol
-            cont_right <- km.port.holdings.prelim[[i]]$contract$right
-            expiry <- km.port.holdings.prelim[[i]]$contract$expiry
-            strike <- km.port.holdings.prelim[[i]]$contract$strike
-            sectype <- km.port.holdings.prelim[[i]]$contract$sectype
-            exc <- km.port.holdings.prelim[[i]]$contract$primary
-            curr <- km.port.holdings.prelim[[i]]$contract$currency
-            pos <- km.port.holdings.prelim[[i]]$portfolioValue$position
-            prc <- km.port.holdings.prelim[[i]]$portfolioValue$marketPrice
-            val <- km.port.holdings.prelim[[i]]$portfolioValue$marketValue
-            if(sectype == "OPT" | sectype == "FUT"){
-              prc <- prc * 100
-              val <- val * 100
-            }
-            avgcost <- km.port.holdings.prelim[[i]]$portfolioValue$averageCost
-            unrealizedPNL <- km.port.holdings.prelim[[i]]$portfolioValue$unrealizedPNL
-            realizedPNL <- km.port.holdings.prelim[[i]]$portfolioValue$realizedPNL
-            dt <- as.Date(self$ts_session_start_time)
-            
-            holding <- data.frame(dt, symbol, cont_right, expiry, strike, sectype, exc, curr, pos, prc, val, avgcost, unrealizedPNL, realizedPNL, self$ts_session_start_time,
-                                  stringsAsFactors = FALSE)
-            colnames(holding) <- self$def_port_holdings_colnames
-            return(holding)
-          })
-          km.port.holdings <- dplyr::bind_rows(res)
-        }
+        tmp2 <- cbind.data.frame(
+          data.frame(t(unlist(contract)), stringsAsFactors = FALSE),
+          data.frame(t(unlist(pv)), stringsAsFactors = FALSE)
+        ) %>% dplyr::mutate(
+          multiplier = ifelse(is.na(as.numeric(multiplier)), 1, as.numeric(multiplier))
+        ) %>% dplyr::mutate(
+          position = as.numeric(position),
+          marketPrice = as.numeric(marketPrice)*multiplier,
+          marketValue = as.numeric(marketValue),
+          averageCost = as.numeric(averageCost),
+          unrealizedPNL = as.numeric(unrealizedPNL),
+          realizedPNL = as.numeric(realizedPNL)
+        )
         
-        self$ts_port_holdings <- km.port.holdings
-        
-        ##
-        # add code to enter port holdings data into database
-        
-      } else {
-        self$TSLogError(self$ts_app_status, paste0("Connection to IB is not active."), "Error", "TSRetrievePortHoldings")
-      }
+        return(tmp2)
+      }, holding)
+      res1 <- dplyr::bind_rows(res)
+      return(res1)
+    },
+    
+    ##
+    # Update account details 
+    TSUpdateAccountDetail = function(){
+      tmp <- reqAccountUpdates(self$ts_conn)
+      curr_mkt_datetime <- IBrokers::reqCurrentTime(self$ts_conn)
+      curr_mkt_date <- as.Date(curr_mkt_datetime)
+      
+      # 1. process account balance
+      acc_bal <- self$TSProcessAccBal(tmp[[1]])
+      port_info <- acc_bal %>% 
+        dplyr::mutate(`Market Date` = curr_mkt_date) %>% 
+        dplyr::select(dplyr::one_of(c("Market Date", self$def_port_info_colnames)))
+      self$ts_port_info <- port_info
+      
+      # 2.1 process holding
+      holding <- self$TSProcessHolding(tmp[[2]])
+      holding_cln <- holding %>% 
+        dplyr::select(dplyr::one_of(self$def_port_holdings_remain)) %>% 
+        dplyr::mutate(`Market Date` = curr_mkt_date) %>% 
+        dplyr::select(dplyr::one_of(c("Market Date", self$def_port_holdings_remain)))
+      colnames(holding_cln) <- self$def_port_holdings_colnames
+      
+      # 2.2 assign nonforex holding
+      port_holdings_nonforex <- holding_cln %>% 
+        dplyr::filter(Exchange != "IDEALPRO")
+      self$ts_port_holdings_nonforex <- port_holdings_nonforex
+      
+      # 2.3 assign forex holding
+      port_holdings_forex <- holding_cln %>% 
+        dplyr::filter(Exchange == "IDEALPRO")
+      self$ts_port_holdings_forex <- port_holdings_forex
+      
+      # 3 calculate cash balance
+      non_cad_usd_cash <- sum(port_holdings_forex[port_holdings_forex$Symbol != "USD","MktVal"])
+      cash_balance <- self$TSReadDataFromSS(self$ts_db_obj, "MyBroKe_CashBalanceMap") %>% 
+        dplyr::left_join(port_holdings_forex, by = c("Currency" = "Symbol")) %>% 
+        dplyr::mutate(
+          `Market Date` = curr_mkt_date,
+          Position = ifelse(is.na(Position), 0, Position),
+          MktPrc = ifelse(is.na(MktPrc), 1, MktPrc)) %>% 
+        dplyr::mutate(
+          Balance = ifelse(
+            Currency == "USD", 
+            port_info[port_info$Metric == "CashBalance" & port_info$Currency == "USD","Value"], 
+            ifelse(
+              Currency == "CAD", 
+              port_info[port_info$Metric == "TotalCashValue" & port_info$Currency == "CAD","Value"] - non_cad_usd_cash,
+              Position
+            )),
+          `Exchange Rate` = MktPrc
+        ) %>% 
+        dplyr::mutate(
+          `CAD Balance` = Balance * `Exchange Rate`
+        ) %>% 
+        dplyr::select(dplyr::one_of(c("Market Date","Name","Currency","Balance","Exchange Rate","CAD Balance")))
+      self$ts_cash_balance <- cash_balance
+      
+      #
+      # 4 account reconciliation
+      #
+      # holding group by currency and security_type (remove future)
+      # + non-CAD, converted to CAD
+      # + CAD (TotalCashValue - non-CAD, converted to CAD)
+      # + non-CAD AccruedCash, converted to CAD
+      # + CAD AccruedCash
+      # + NetLiquidationUncertainty
+      # = CalcNetLiquidation
+      # - ActualNetLiquidation 
+      # = Unreconciled amount
+      #
+      
+      # security portion
+      acc_recon1 <- port_holdings_nonforex %>% 
+        dplyr::filter(`Security Type` != "FUT") %>%
+        dplyr::group_by(Currency, `Security Type`) %>% 
+        dplyr::summarise(Balance = sum(MktVal)) %>% 
+        dplyr::mutate(`Market Date` = curr_mkt_date, `Market Datetime` = curr_mkt_datetime) %>% 
+        dplyr::select(dplyr::one_of(c("Market Date","Market Datetime","Security Type","Currency","Balance")))
+      
+      # cash portion
+      acc_recon2 <- cash_balance %>% 
+        dplyr::mutate(`Market Datetime` = curr_mkt_datetime, `Security Type` = "Cash") %>% 
+        dplyr::select(dplyr::one_of(c("Market Date","Market Datetime","Security Type","Currency","Balance")))
+      
+      # portfort info portion
+      acc_recon3 <- data.frame(
+        `Market Datetime` = rep(curr_mkt_datetime, 4),
+        `Security Type` = c("AccruedCash","AccruedCash","NetLiquidationUncertainty","NetLiquidation"),
+        Currency = c("USD", "CAD","CAD", "CAD"),
+        stringsAsFactors = FALSE,
+        check.names = FALSE
+      )
+      acc_recon3 <- acc_recon3 %>% 
+        dplyr::left_join(port_info[,], by = c("Currency", "Security Type" = "Metric")) %>% 
+        dplyr::mutate(
+          `Market Date` = curr_mkt_date,
+          Balance = ifelse(is.na(Value), 0, Value)
+        ) %>% 
+        dplyr::select(dplyr::one_of(c("Market Date", "Market Datetime", "Security Type", "Currency", "Balance")))
+      
+      # combine all three portions
+      tmp <- dplyr::bind_rows(list(
+        acc_recon1,
+        acc_recon2,
+        acc_recon3
+      ))
+      
+      # final tuning
+      acc_recon <- tmp %>% 
+        dplyr::left_join(cash_balance[,c("Currency","Exchange Rate")], by = c("Currency")) %>%
+        dplyr::mutate(`CAD Balance` = Balance * `Exchange Rate`)
+      self$ts_acc_recon <- acc_recon
+      self$TSWriteDataToSS(self$ts_db_obj, acc_recon, "MyBroKe_DailyAccountReconciliation", apd = TRUE)
       
       invisible(self)
-    },
-    
-    ##
-    # get portfolio holdings
-    TSGetPortHoldings = function(){
-      return(self$ts_port_holdings)
-    },
-    
-    ##
-    # RetrievePortfolioInfo
-    TSUpdatePortInfo = function(){
-      if(isConnected(self$ts_conn)){
-        km.port.prelim <- reqAccountUpdates(self$ts_conn)
-        #
-        # Retrieve portfolio value overview data
-        #
-        
-        #
-        # EquityWithLoanValue (Settled Cash) = Cash recognized at the time of settlement
-        #                                       - Purchases at the time of trade
-        #                                       - Commissions - taxes - fees
-        #
-        # TotalCashValue = EquityWithLoanValue + Sales at the time of trade
-        #
-        km.port.info <- rbind.data.frame(km.port.prelim[[1]]$NetLiquidation,
-                                         km.port.prelim[[1]]$GrossPositionValue,
-                                         km.port.prelim[[1]]$EquityWithLoanValue,
-                                         km.port.prelim[[1]]$TotalCashValue,
-                                         km.port.prelim[[1]]$CashBalance,
-                                         km.port.prelim[[1]]$ExchangeRate,
-                                         km.port.prelim[[1]]$AccruedDividend)
-        
-        rownames(km.port.info) <- c("NetLiquidation","GrossPositionValue","EquityWithLoanValue","TotalCashValue",
-                                    "CashBalance","ExchangeRate","AccruedDividend")
-        colnames(km.port.info) <- c("Value","Currency")
-        km.port.info$Value <- as.numeric(as.character(km.port.info$Value))
-        km.port.info$Currency <- as.character(km.port.info$Currency)
-        
-        #
-        # Check if currency is appropriate
-        #
-        if(km.port.info["NetLiquidation","Currency"] == "CAD" &
-           km.port.info["GrossPositionValue","Currency"] == "CAD" &
-           km.port.info["EquityWithLoanValue","Currency"] == "CAD" &
-           km.port.info["TotalCashValue","Currency"] == "CAD"){
-          #
-          # Find available cash for trading
-          #
-          cash <- km.port.info["CashBalance",]
-          cash.us <- cash[cash$Currency == "USD", "Value"]
-          cash.ca <- cash[cash$Currency == "CAD", "Value"]
-          
-          if(length(cash.ca) == 0 & length(cash.us) != 0){
-            cal.cash.ca <- km.port.info["TotalCashValue","Value"] - cash.us * km.port.info["ExchangeRate","Value"]
-            cash.balance.rev <- data.frame(c(cash.us, cal.cash.ca),
-                                           c("USD","CAD"))
-          } else if (length(cash.ca) != 0 & length(cash.us) == 0){
-            cal.cash.us <- (km.port.info["TotalCashValue","Value"] - cash.ca)/km.port.info["ExchangeRate","Value"]
-            cash.balance.rev <- data.frame(c(cal.cash.us, cash.ca),
-                                           c("USD","CAD"))
-          } else {
-            self$TSLogError(self$ts_app_status, paste0("Multiple currencies exist!"), "Warning", "TSRetrievePortInfo")
-          }
-          rownames(cash.balance.rev) <- c("CashBalanceUS","CashBalanceCA")
-          colnames(cash.balance.rev) <- c("Value","Currency")
-          km.port.info <- rbind.data.frame(km.port.info, cash.balance.rev)
-          
-          km.port.info$Date <- rep(as.Date(self$ts_session_start_time), nrow(km.port.info))
-          km.port.info$TimeStamp <- rep(self$ts_session_start_time, nrow(km.port.info))
-          km.port.info <- km.port.info[,self$def_port_info_colnames]
-          
-          #
-          # Assign individual metric
-          #
-          self$ts_ca_net_liquidation <- km.port.info["NetLiquidation","Value"]
-          self$ts_ca_gross_position_value <- km.port.info["GrossPositionValue","Value"]
-          self$ts_ca_equity_with_loan_value <- km.port.info["EquityWithLoanValue","Value"]
-          self$ts_ca_total_cash_value <- km.port.info["TotalCashValue","Value"]
-          self$ts_us_cash_balance <- km.port.info["CashBalanceUS","Value"]
-          self$ts_ca_cash_balance <- km.port.info["CashBalanceCA","Value"]
-          self$ts_ca_accrued_divdend <- km.port.info["AccruedDividend","Value"]
-          self$ts_exchange_rate <- km.port.info["ExchangeRate","Value"]
-          
-          #
-          # Assign port info data frame
-          #
-          self$ts_port_info <- km.port.info
-          
-          ##
-          # Add code to add port info to database
-          
-        } else {
-          self$TSLogError(self$ts_app_status, paste0("Currency not as expected!"), "Warning", "TSRetrievePortInfo")
-        }
-      } else {
-        self$TSLogError(self$ts_app_status, paste0("Connection to IB is not active."), "Error", "TSRetrievePortInfo")
-      }
-      
-      invisible(self)
-    },
-    
-    ##
-    # get portfolio info
-    TSGetPortInfo = function(){
-      return(self$ts_port_info)
     },
     
     ##
@@ -382,7 +393,7 @@ IBTradingSession <- R6::R6Class(
           PriExchange = item$contract$primary,
           IBSymbol = item$contract$symbol,
           LocalSymbol = item$contract$local,
-          SecurityType = item$contract$sectype,
+          `Security Type` = item$contract$sectype,
           ContractRight = item$contract$right,
           Expiry = item$contract$expiry,
           Strike = item$contract$strike,
@@ -495,10 +506,10 @@ IBTradingSession <- R6::R6Class(
     TSGenFnlTradeList = function(){
       
       if(isConnected(self$ts_conn)){
-        # Field: "LocalTicker","Action","Quantity","OrderType","LimitPrice","SecurityType","Currency"
+        # Field: "Symbol","Action","Quantity","OrderType","LimitPrice","Security Type","Currency"
         man_trd_df <- self$ts_prelimTradelist
         if(nrow(man_trd_df) != 0){
-          man_trd_df$YahooTicker <- paste0(man_trd_df$LocalTicker,ifelse(man_trd_df$Currency=="CAD",".TO",""))
+          man_trd_df$YahooTicker <- paste0(man_trd_df$Symbol,ifelse(man_trd_df$Currency=="CAD",".TO",""))
           
           man_trd_df$LastTradePrice <- rep(0,nrow(man_trd_df))
           man_trd_df$AdjustedLimitPrice <- man_trd_df$LimitPrice
@@ -510,11 +521,11 @@ IBTradingSession <- R6::R6Class(
             #
             # Update commission
             #
-            if(man_trd_df[i,"Currency"] == "USD" | man_trd_df[i,"Currency"] == "CAD"){
-              base_comm <- self$ts_comm[[man_trd_df[i,"SecurityType"]]][[man_trd_df[i,"Currency"]]]
+            if(man_trd_df[i,"Currency"] %in% self$ts_tradable_currency){
+              base_comm <- self$ts_comm[[man_trd_df[i,"Security Type"]]][[man_trd_df[i,"Currency"]]]
               man_trd_df[i,"Commission"] <- max(1, base_comm*man_trd_df[i,"Quantity"], na.rm = TRUE)
             } else {
-              self$TSLogError(self$ts_app_status, paste0("Non-north america trade exist!"), "Warning", "TSGenFnlTradeList")
+              self$TSLogError(self$ts_app_status, paste0("Invalid trade currency - ", man_trd_df[i,"Currency"]), "Warning", "TSGenFnlTradeList")
             }
             
             #
@@ -551,29 +562,32 @@ IBTradingSession <- R6::R6Class(
         #
         # Request most up-to-date account info
         #
-        self$TSUpdatePortHoldings()
-        curr_holdings <- self$TSGetPortHoldings()
-        
-        self$TSUpdatePortInfo()
-        us_cash_balance <- self$ts_us_cash_balance
-        ca_cash_balance <- self$ts_ca_cash_balance
-        exch_rate <- self$ts_exchange_rate
+        self$TSUpdateAccountDetail()
         
         if(identical(colnames(single_trade), self$def_fnltradelist_colnames)){
+          
           #
           # Validate and execute a single trade
           #
           bad.sell.order <- 0
           bad.buy.order <- 0
-          if(tolower(single_trade[,"SecurityType"]) == "stk" | 
-             tolower(single_trade[,"SecurityType"]) == "opt" | 
-             tolower(single_trade[,"SecurityType"]) == "fut" ){
+          if(tolower(single_trade[,"Security Type"]) == "stk" | 
+             tolower(single_trade[,"Security Type"]) == "opt" | 
+             tolower(single_trade[,"Security Type"]) == "fut" ){
+            
+            #
+            # Retrieve holding and cash balance
+            #
+            curr_holdings <- self$ts_port_holdings_nonforex
+            tmp <- self$ts_cash_balance %>% dplyr::filter(Currency == single_trade$Currency)
+            cash_balance <- tmp$Balance
+            exch_rate <- tmp$`Exchange Rate`
             
             #
             # Validate a trade
             #
             if(tolower(single_trade$Action) == "sell"){
-              sell_trade <- merge.data.frame(single_trade, curr_holdings, by = c("LocalTicker", "Currency"))
+              sell_trade <- merge.data.frame(single_trade, curr_holdings, by = c("Symbol", "Currency"))
               
               ValidateSellOrder <- function(x){
                 if(x[1] > x[2]){
@@ -591,23 +605,15 @@ IBTradingSession <- R6::R6Class(
               }
               
             } else if (tolower(single_trade$Action) == "buy"){
-              us.order <- single_trade[single_trade$Currency == "USD",c("Quantity","AdjustedLimitPrice","Commission")]
-              if(nrow(us.order) != 0){
-                us.order.value <- sum(us.order$Quantity*us.order$AdjustedLimitPrice) + sum(us.order$Commission)
-              } else {
-                us.order.value <- 0
-              }
+              order <- single_trade %>%
+                dplyr::mutate(trade_amount = Quantity*AdjustedLimitPrice)
               
-              ca.order <- single_trade[single_trade$Currency == "CAD",c("Quantity","AdjustedLimitPrice","Commission")]
-              if(nrow(ca.order) != 0){
-                ca.order.value <- sum(ca.order$Quantity*ca.order$AdjustedLimitPrice) + sum(ca.order$Commission)
-              } else {
-                ca.order.value <- 0
-              }
+              order.total.value <- sum(order$trade_amount) + sum(order$Commission)
               
-              bad.buy.order <- 0
-              if(us.order.value > max(us_cash_balance,0) | ca.order.value > max(ca_cash_balance,0)){
+              if(order.total.value > max(cash_balance,0)){
                 bad.buy.order <- 1
+              } else {
+                bad.buy.order <- 0
               }
             } else {
               self$TSLogError(self$ts_app_status, paste0("Trade type ", single_trade$Action, " is not valid!"), "Error", "TSExecuteTrade")
@@ -617,7 +623,7 @@ IBTradingSession <- R6::R6Class(
             # Execute the trade
             #
             if(bad.buy.order == 0 & bad.sell.order == 0 & single_trade$ValidTicker == TRUE){
-              t <- single_trade$LocalTicker
+              t <- single_trade$Symbol
               ri <- single_trade$Right
               ex <- single_trade$Expiry
               stk <- single_trade$Strike
@@ -625,7 +631,7 @@ IBTradingSession <- R6::R6Class(
               ac <- single_trade$Action
               q <- single_trade$Quantity
               o <- single_trade$OrderType
-              sect <- single_trade$SecurityType
+              sect <- single_trade$`Security Type`
               p <- single_trade$AdjustedLimitPrice
               c <- single_trade$Currency
 
@@ -655,7 +661,7 @@ IBTradingSession <- R6::R6Class(
                 cont <- IBrokers::twsFUT(
                   symbol = t,
                   expiry = ex,
-                  exch = "ONE",
+                  exch = "SMART",
                   currency = c
                 )
               }
@@ -697,47 +703,59 @@ IBTradingSession <- R6::R6Class(
               # order validation failed
               self$ts_trade_ids <- c(self$ts_trade_ids, -1)
               self$ts_trade_results <- c(self$ts_trade_results, "Fail")
-              msg <- paste0("$",single_trade$LocalTicker,
+              msg <- paste0("$",single_trade$Symbol,
                             ifelse(bad.buy.order == 1, ": Bad buy order!", ": Bad sell order!"))
               self$TSLogError(self$ts_app_status, msg, "Error", "TSExecuteTrade")
               self$ts_last_trade_message <- msg
               print(msg)
             }
-          } else if(tolower(single_trade[,"SecurityType"]) == "forex"){
+          } else if(tolower(single_trade[,"Security Type"]) == "forex"){
             #
             # Validate a trade
             #
-            tgt_curr <- single_trade[,"LocalTicker"]
+            tgt_curr <- single_trade[,"Symbol"]
             tgt_value <- single_trade[,"Quantity"]
             exch <- "IDEALPRO"
             quoted_curr <- single_trade[,"Currency"]
             
-            if(tgt_curr == "CAD"){
-              side <- "SELL"
-              trade_value <- round(tgt_value/exch_rate, 0)
-              us_cash_order <- trade_value
-              if(us_cash_balance < us_cash_order){
-                bad.buy.order = 1
-              }
-              forex_cont <- twsCurrency(
-                symbol = quoted_curr,
-                exch = exch,
-                currency = tgt_curr
-              )
-            } else if (tgt_curr == "USD"){
-              side <- "BUY"
-              trade_value <- tgt_value
-              ca_order_value <- exch_rate * trade_value
-              if(ca_cash_balance < ca_order_value){
-                bad.buy.order = 1
-              }
-              forex_cont <- twsCurrency(
-                symbol = tgt_curr,
-                exch = exch,
-                currency = quoted_curr
-              )
+            if(tgt_curr %in% self$ts_tradable_currency & quoted_curr %in% self$ts_tradable_currency){
+              if(tgt_curr == "CAD"){
+                tmp <- self$ts_cash_balance %>% dplyr::filter(Currency == quoted_curr)
+                cash_balance <- tmp$Balance
+                exch_rate <- tmp$`Exchange Rate`
+                
+                side <- "SELL"
+                trade_value <- round(tgt_value/exch_rate, 0)
+                order_value <- 1 * trade_value
+                if(cash_balance < trade_value){
+                  bad.buy.order = 1
+                }
+                forex_cont <- twsCurrency(
+                  symbol = quoted_curr,
+                  exch = exch,
+                  currency = tgt_curr
+                )
+              } else {
+                tmp <- self$ts_cash_balance %>% dplyr::filter(Currency == tgt_curr)
+                exch_rate <- tmp$`Exchange Rate`
+                
+                tmp2 <- self$ts_cash_balance %>% dplyr::filter(Currency == 'CAD')
+                cash_balance <- tmp2$Balance
+                
+                side <- "BUY"
+                trade_value <- tgt_value
+                order_value <- exch_rate * trade_value
+                if(cash_balance < order_value){
+                  bad.buy.order = 1
+                }
+                forex_cont <- twsCurrency(
+                  symbol = tgt_curr,
+                  exch = exch,
+                  currency = quoted_curr
+                )
+              } 
             } else {
-              self$TSLogError(self$ts_app_status, paste0("Error only USD and CAD are allowed to traded."), "Error", "TSExecuteTrade")
+              self$TSLogError(self$ts_app_status, paste0("The requested currency ", tgt_curr, " or ", quoted_curr, " is not allowed to traded."), "Error", "TSExecuteTrade")
             }
             #
             # Execute the trade
@@ -869,7 +887,7 @@ IBTradingSession <- R6::R6Class(
     # generate trade result
     TSGenTradeResults = function(){
       if(isConnected(self$ts_conn)){
-        temp_df <- self$ts_fnlTradelist[,c("LocalTicker","Currency")]
+        temp_df <- self$ts_fnlTradelist[,c("Symbol","Currency")]
         exp_trd_cnt <- nrow(temp_df)
         act_trd_cnt <- length(self$ts_trade_ids)
         temp_df$TradeID <- self$ts_trade_ids[(act_trd_cnt-exp_trd_cnt+1):act_trd_cnt]
