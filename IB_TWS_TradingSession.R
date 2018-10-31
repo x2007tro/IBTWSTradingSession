@@ -26,7 +26,7 @@ IBTradingSession <- R6::R6Class(
     def_port_holdings_remain = c("symbol","right","expiry","strike","sectype","primary","currency","position",
                                  "averageCost","marketPrice","marketValue","unrealizedPNL","realizedPNL"),
     def_port_holdings_colnames = c("Market Date","Symbol","Right","Expiry","Strike","Security Type","Exchange","Currency","Position",
-                                   "Cost","MktPrc","MktVal","UnrealizedPNL","RealizedPNL"),
+                                   "Cost","Market Price","Market Value","Unrealized Profit","Realized Profit"),
     def_port_info_colnames = c("Date", "Metric", "Value", "Currency"),
     def_watchlist_colnames = c("Symbol","Currency","Security Type","Comments"),
     def_prelimtradelist_colnames = c("Symbol","Right","Expiry","Strike","Exchange","Action","Quantity","OrderType","LimitPrice",
@@ -291,13 +291,13 @@ IBTradingSession <- R6::R6Class(
       self$ts_port_holdings_forex <- port_holdings_forex
       
       # 3 calculate cash balance
-      non_cad_usd_cash <- sum(port_holdings_forex[port_holdings_forex$Symbol != "USD","MktVal"])
+      non_cad_usd_cash <- sum(port_holdings_forex[port_holdings_forex$Symbol != "USD","Market Value"])
       cash_balance <- self$TSReadDataFromSS(self$ts_db_obj, "MyBroKe_CashBalanceMap") %>% 
         dplyr::left_join(port_holdings_forex, by = c("Currency" = "Symbol")) %>% 
         dplyr::mutate(
           `Market Date` = curr_mkt_date,
           Position = ifelse(is.na(Position), 0, Position),
-          MktPrc = ifelse(is.na(MktPrc), 1, MktPrc)) %>% 
+          `Market Price` = ifelse(is.na(`Market Price`), 1, `Market Price`)) %>% 
         dplyr::mutate(
           Balance = ifelse(
             Currency == "USD", 
@@ -307,7 +307,7 @@ IBTradingSession <- R6::R6Class(
               port_info[port_info$Metric == "TotalCashValue" & port_info$Currency == "CAD","Value"] - non_cad_usd_cash,
               Position
             )),
-          `Exchange Rate` = MktPrc
+          `Exchange Rate` = `Market Price`
         ) %>% 
         dplyr::mutate(
           `CAD Balance` = Balance * `Exchange Rate`
@@ -333,7 +333,7 @@ IBTradingSession <- R6::R6Class(
       acc_recon1 <- port_holdings_nonforex %>% 
         dplyr::filter(`Security Type` != "FUT") %>%
         dplyr::group_by(Currency, `Security Type`) %>% 
-        dplyr::summarise(Balance = sum(MktVal)) %>% 
+        dplyr::summarise(Balance = sum(`Market Value`)) %>% 
         dplyr::mutate(`Market Date` = curr_mkt_date, `Market Datetime` = curr_mkt_datetime) %>% 
         dplyr::select(dplyr::one_of(c("Market Date","Market Datetime","Security Type","Currency","Balance")))
       
