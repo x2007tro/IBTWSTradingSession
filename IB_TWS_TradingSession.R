@@ -242,7 +242,10 @@ IBTradingSession <- R6::R6Class(
           data.frame(t(unlist(contract)), stringsAsFactors = FALSE),
           data.frame(t(unlist(pv)), stringsAsFactors = FALSE)
         ) %>% dplyr::mutate(
-          multiplier = ifelse(is.na(as.numeric(multiplier)), 1, as.numeric(multiplier))
+          multiplier = ifelse(is.na(as.numeric(multiplier)), 1, as.numeric(multiplier)),
+          right = ifelse(right == "0", "", right),
+          expiry = ifelse(expiry == "0", "", expiry),
+          strike = ifelse(strike == "0", "", strike)
         ) %>% dplyr::mutate(
           position = as.numeric(position),
           marketPrice = as.numeric(marketPrice)*multiplier,
@@ -578,7 +581,7 @@ IBTradingSession <- R6::R6Class(
             #
             # Retrieve holding and cash balance
             #
-            curr_holdings <- self$ts_port_holdings_nonforex
+            curr_holdings <- self$ts_port_holdings_nonforex %>% dplyr::select(-Exchange)
             tmp <- self$ts_cash_balance %>% dplyr::filter(Currency == single_trade$Currency)
             cash_balance <- tmp$Balance
             exch_rate <- tmp$`Exchange Rate`
@@ -587,7 +590,11 @@ IBTradingSession <- R6::R6Class(
             # Validate a trade
             #
             if(tolower(single_trade$Action) == "sell"){
-              sell_trade <- merge.data.frame(single_trade, curr_holdings, by = c("Symbol", "Currency"))
+              sell_trade <- dplyr::inner_join(
+                single_trade,
+                curr_holdings,
+                by = c("Symbol", "Right", "Expiry", "Strike", "Currency", "Security Type")
+              )
               
               ValidateSellOrder <- function(x){
                 if(x[1] > x[2]){
@@ -661,7 +668,7 @@ IBTradingSession <- R6::R6Class(
                 cont <- IBrokers::twsFUT(
                   symbol = t,
                   expiry = ex,
-                  exch = "SMART",
+                  exch = "ONE",
                   currency = c
                 )
               }
