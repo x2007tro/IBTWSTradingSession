@@ -27,6 +27,8 @@ IBTradingSession <- R6::R6Class(
                                  "averageCost","marketPrice","marketValue","unrealizedPNL","realizedPNL"),
     def_port_holdings_colnames = c("Market Date","Symbol","Right","Expiry","Strike","Security Type","Exchange","Currency","Position",
                                    "Cost","Market Price","Market Value","Unrealized Profit","Realized Profit"),
+    def_realized_profits_remain = c("Market Date","Market Datetime","Symbol","Right","Expiry","Strike","Security Type",
+                                    "Exchange","Currency","Position","Cost","Realized Profit"),
     def_port_info_colnames = c("Date", "Metric", "Value", "Currency"),
     def_watchlist_colnames = c("Symbol","Currency","Security Type","Comments"),
     def_prelimtradelist_colnames = c("Symbol","Right","Expiry","Strike","Exchange","Action","Quantity","OrderType","LimitPrice",
@@ -287,6 +289,13 @@ IBTradingSession <- R6::R6Class(
       port_holdings_nonforex <- holding_cln %>% 
         dplyr::filter(Exchange != "IDEALPRO")
       self$ts_port_holdings_nonforex <- port_holdings_nonforex
+      
+      # add realized profit to database
+      realized_profit <- port_holdings_nonforex %>% 
+        dplyr::filter(`Realized Profit` != 0) %>% 
+        dplyr::mutate(`Market Datetime` = curr_mkt_datetime) %>% 
+        dplyr::select(dplyr::one_of(self$def_realized_profits_remain))
+      self$TSWriteDataToSS(self$ts_db_obj, realized_profit, "MyBroKe_RealizedProfitHistory", apd = TRUE)
       
       # 2.3 assign forex holding
       port_holdings_forex <- holding_cln %>% 
