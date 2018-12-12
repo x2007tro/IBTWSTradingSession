@@ -177,9 +177,24 @@ IBTradingSession <- R6::R6Class(
     },
     
     ##
+    # Connect to MariaDB using connection string
+    ##
+    TSConnMySql = function(db_obj){
+      conn <- DBI::dbConnect(
+        drv = RMariaDB::MariaDB(),
+        user = db_obj$id,
+        password = db_obj$pwd,
+        dbname = db_obj$dbn,
+        host = db_obj$srv,
+        port = db_obj$prt
+      )
+      return(conn)
+    },
+    
+    ##
     # Write a table to sql server db
     TSWriteDataToSS = function(db_obj, data, tbl_name, apd = TRUE){
-      conn <- self$TSConnSqlServer(db_obj)
+      conn <- self$TSConnMySql(db_obj)
       df <- DBI::dbWriteTable(conn, name = tbl_name, value = data,
                               append = apd, overwrite = !apd, row.names = FALSE)
       DBI::dbDisconnect(conn) 				  
@@ -189,7 +204,7 @@ IBTradingSession <- R6::R6Class(
     ##
     # Get query results from sql server db
     TSGetQueryResFromSS = function(db_obj, qry_str){
-      conn <- self$ConnSqlServer(db_obj)
+      conn <- self$TSConnMySql(db_obj)
       qry_conn <- DBI::dbSendQuery(conn, qry_str)
       res <- DBI::dbFetch(qry_conn)
       DBI::dbClearResult(qry_conn)
@@ -200,7 +215,7 @@ IBTradingSession <- R6::R6Class(
     ##
     # Read a table from sql server db
     TSReadDataFromSS = function(db_obj, tbl_name){
-      conn <- self$TSConnSqlServer(db_obj)
+      conn <- self$TSConnMySql(db_obj)
       df <- DBI::dbReadTable(conn, tbl_name)
       DBI::dbDisconnect(conn) 				  
       return(df)
