@@ -331,8 +331,8 @@ IBTradingSession <- R6::R6Class(
       realized_profit <- port_holdings_nonforex %>% 
         dplyr::filter(`Realized Profit` != 0) %>% 
         dplyr::mutate(
-          `Market Datetime` = curr_mkt_datetime,
-          `Trade mode` = self$ts_trade_mode,
+          `Market Datetime` = format(curr_mkt_datetime, "%Y-%m-%d %H:%M:%S"),
+          `Trade Mode` = self$ts_trade_mode,
           `Application Status` = self$ts_app_status) %>% 
         dplyr::select(dplyr::one_of(self$def_realized_profits_remain))
       self$TSWriteDataToSS(self$ts_db_obj, realized_profit, "MyBroKe_RealizedProfitHistory", apd = TRUE)
@@ -380,23 +380,24 @@ IBTradingSession <- R6::R6Class(
       # - ActualNetLiquidation 
       # = Unreconciled amount
       #
+      curr_mkt_datetime_str <- format(curr_mkt_datetime, "%Y-%m-%d %H:%M:%S")
       
       # security portion
       acc_recon1 <- port_holdings_nonforex %>% 
         dplyr::filter(`Security Type` != "FUT") %>%
         dplyr::group_by(Currency, `Security Type`) %>% 
         dplyr::summarise(Balance = sum(`Market Value`)) %>% 
-        dplyr::mutate(`Market Date` = curr_mkt_date, `Market Datetime` = curr_mkt_datetime) %>% 
+        dplyr::mutate(`Market Date` = curr_mkt_date, `Market Datetime` = curr_mkt_datetime_str) %>% 
         dplyr::select(dplyr::one_of(c("Market Date","Market Datetime","Security Type","Currency","Balance")))
       
       # cash portion
       acc_recon2 <- cash_balance %>% 
-        dplyr::mutate(`Market Datetime` = curr_mkt_datetime, `Security Type` = "Cash") %>% 
+        dplyr::mutate(`Market Datetime` = curr_mkt_datetime_str, `Security Type` = "Cash") %>% 
         dplyr::select(dplyr::one_of(c("Market Date","Market Datetime","Security Type","Currency","Balance")))
       
       # portfort info portion
       acc_recon3 <- data.frame(
-        `Market Datetime` = rep(curr_mkt_datetime, 4),
+        `Market Datetime` = rep(curr_mkt_datetime_str, 4),
         `Security Type` = c("AccruedCash","AccruedCash","NetLiquidationUncertainty","NetLiquidation"),
         Currency = c("USD", "CAD","CAD", "CAD"),
         stringsAsFactors = FALSE,
@@ -406,6 +407,7 @@ IBTradingSession <- R6::R6Class(
         dplyr::left_join(port_info[,], by = c("Currency", "Security Type" = "Metric")) %>% 
         dplyr::mutate(
           `Market Date` = curr_mkt_date,
+          `Market Datetime` = curr_mkt_datetime_str,
           Balance = ifelse(is.na(Value), 0, Value)
         ) %>% 
         dplyr::select(dplyr::one_of(c("Market Date", "Market Datetime", "Security Type", "Currency", "Balance")))
