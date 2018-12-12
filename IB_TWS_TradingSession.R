@@ -93,7 +93,6 @@ IBTradingSession <- R6::R6Class(
       # some checks
       ct <- match.arg(c_type)
       at <- match.arg(acct_type)
-      as <- match.arg(app_status)
       
       ##
       # connect to trade session
@@ -161,7 +160,6 @@ IBTradingSession <- R6::R6Class(
       self$ts_trade_transmit_switch <- FALSE
       self$ts_last_trade_message <- NULL
       self$ts_trade_gooduntildate <- as.Date(reqCurrentTime(my_conn))
-      
     },
     
     ##
@@ -190,14 +188,14 @@ IBTradingSession <- R6::R6Class(
     
     ##
     # Get query results from sql server db
-    TSGetQueryResFromSS <- function(db_obj, qry_str){
+    TSGetQueryResFromSS = function(db_obj, qry_str){
       conn <- self$ConnSqlServer(db_obj)
       qry_conn <- DBI::dbSendQuery(conn, qry_str)
       res <- DBI::dbFetch(qry_conn)
       DBI::dbClearResult(qry_conn)
       DBI::dbDisconnect(conn)
       return(res)
-    }
+    },
     
     ##
     # Read a table from sql server db
