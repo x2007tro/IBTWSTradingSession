@@ -344,8 +344,9 @@ IBTradingSession <- R6::R6Class(
       
       # 3 calculate cash balance
       non_cad_usd_cash <- sum(port_holdings_forex[port_holdings_forex$Symbol != "USD","Market Value"])
-      usd_cash <- port_info[port_info$Metric == "CashBalance" & port_info$Currency == "USD","Value"] * port_holdings_forex$`Market Price`[port_holdings_forex$Symbol == 'USD']
-      #non_cad_usd_cash <- sum(port_holdings_forex[,"Market Value"])
+      usd_cash <- port_info[port_info$Metric == "CashBalance" & port_info$Currency == "USD","Value"]
+      usd_cash_cad_value <- usd_cash * port_holdings_forex$`Market Price`[port_holdings_forex$Symbol == 'USD']
+
       cash_balance <- self$TSReadDataFromSS(self$ts_db_obj, "MyBroKe_CashBalanceMap") %>% 
         dplyr::left_join(port_holdings_forex, by = c("Currency" = "Symbol")) %>% 
         dplyr::mutate(
@@ -358,7 +359,7 @@ IBTradingSession <- R6::R6Class(
             usd_cash, 
             ifelse(
               Currency == "CAD", 
-              port_info[port_info$Metric == "TotalCashValue" & port_info$Currency == "CAD","Value"] - usd_cash - non_cad_usd_cash,
+              port_info[port_info$Metric == "TotalCashValue" & port_info$Currency == "CAD","Value"] - usd_cash_cad_value - non_cad_usd_cash,
               Position
             )),
           `Exchange Rate` = `Market Price`
