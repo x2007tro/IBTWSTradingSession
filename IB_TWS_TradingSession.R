@@ -39,6 +39,7 @@ IBTradingSession <- R6::R6Class(
     ##
     # variables
     ts_client_id = 0,
+    ts_ibkr_acct_code = ibkr_acct_code,
     ts_platform = NULL,
     ts_account_type = NULL,
     ts_trade_mode = NULL,
@@ -303,7 +304,7 @@ IBTradingSession <- R6::R6Class(
     ##
     # Update account details 
     TSUpdateAccountDetail = function(){
-      tmp <- reqAccountUpdates(self$ts_conn, acctCode = 'U1989090')
+      tmp <- reqAccountUpdates(self$ts_conn, acctCode = self$ts_ibkr_acct_code)
       curr_mkt_datetime <- IBrokers::reqCurrentTime(self$ts_conn)
       curr_mkt_date <- as.Date(curr_mkt_datetime)
       
