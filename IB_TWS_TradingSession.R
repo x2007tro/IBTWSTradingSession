@@ -25,9 +25,9 @@ IBTradingSession <- R6::R6Class(
     # parameters that should not be changed
     def_port_holdings_remain = c("symbol","right","expiry","strike","sectype","primary","currency","position",
                                  "averageCost","marketPrice","marketValue","unrealizedPNL","realizedPNL"),
-    def_port_holdings_colnames = c("Market Date","Symbol","Right","Expiry","Strike","Security Type","Exchange","Currency","Position",
+    def_port_holdings_colnames = c("Market Date","Account Number","Symbol","Right","Expiry","Strike","Security Type","Exchange","Currency","Position",
                                    "Cost","Market Price","Market Value","Unrealized Profit","Realized Profit"),
-    def_realized_profits_remain = c("Market Date","Market Datetime","Symbol","Right","Expiry","Strike","Security Type",
+    def_realized_profits_remain = c("Market Date","Market Datetime","Account Number","Symbol","Right","Expiry","Strike","Security Type",
                                     "Exchange","Currency","Position","Cost","Realized Profit", "Trade Mode", "Application Status"),
     def_port_info_colnames = c("Date", "Metric", "Value", "Currency"),
     def_watchlist_colnames = c("Symbol","Currency","Security Type","Comments"),
@@ -39,7 +39,7 @@ IBTradingSession <- R6::R6Class(
     ##
     # variables
     ts_client_id = 0,
-    ts_ibkr_acct_code = ibkr_acct_code,
+    ts_acct_number = "",
     ts_platform = NULL,
     ts_account_type = NULL,
     ts_trade_mode = NULL,
@@ -87,7 +87,7 @@ IBTradingSession <- R6::R6Class(
     initialize = function(
       c_id, 
       c_type = c("TWS", "IBG"), 
-      acct_type = c("Live", "Paper"), 
+      acct_type = c("Live", "Paper"),
       l_host = "localhost"){
       
       ##
@@ -303,24 +303,28 @@ IBTradingSession <- R6::R6Class(
     
     ##
     # Update account details 
-    TSUpdateAccountDetail = function(){
-      tmp <- reqAccountUpdates(self$ts_conn, acctCode = self$ts_ibkr_acct_code)
+    TSUpdateAccountDetail = function(acct_number){
+      tmp <- reqAccountUpdates(self$ts_conn, acctCode = acct_number)
+      self$ts_acct_number <- acct_number
+      
       curr_mkt_datetime <- IBrokers::reqCurrentTime(self$ts_conn)
       curr_mkt_date <- as.Date(curr_mkt_datetime)
       
       # 1. process account balance
       acc_bal <- self$TSProcessAccBal(tmp[[1]])
       port_info <- acc_bal %>% 
+        dplyr::mutate(`Account Number` = acct_number) %>% 
         dplyr::mutate(`Market Date` = curr_mkt_date) %>% 
-        dplyr::select(dplyr::one_of(c("Market Date", self$def_port_info_colnames)))
+        dplyr::select(dplyr::one_of(c("Market Date", "Account Number", self$def_port_info_colnames)))
       self$ts_port_info <- port_info
       
       # 2.1 process holding
       holding <- self$TSProcessHolding(tmp[[2]])
       holding_cln <- holding %>% 
         dplyr::select(dplyr::one_of(self$def_port_holdings_remain)) %>% 
+        dplyr::mutate(`Account Number` = acct_number) %>% 
         dplyr::mutate(`Market Date` = curr_mkt_date) %>% 
-        dplyr::select(dplyr::one_of(c("Market Date", self$def_port_holdings_remain)))
+        dplyr::select(dplyr::one_of(c("Market Date", "Account Number", self$def_port_holdings_remain)))
       colnames(holding_cln) <- self$def_port_holdings_colnames
       
       # 2.2 assign nonforex holding
@@ -345,12 +349,16 @@ IBTradingSession <- R6::R6Class(
       
       # 3 calculate cash balance
       non_cad_usd_cash <- sum(port_holdings_forex[port_holdings_forex$Symbol != "USD","Market Value"])
+      if(is.na(non_cad_usd_cash)) { non_cad_usd_cash <- 0 }
       usd_cash <- port_info[port_info$Metric == "CashBalance" & port_info$Currency == "USD","Value"]
+      if(length(usd_cash) == 0) { usd_cash <- 0 }
       usd_cash_cad_value <- usd_cash * port_holdings_forex$`Market Price`[port_holdings_forex$Symbol == 'USD']
+      if(length(usd_cash_cad_value) == 0) { usd_cash_cad_value <- 0 }
 
       cash_balance <- self$TSReadDataFromSS(self$ts_db_obj, "MyBroKe_CashBalanceMap") %>% 
         dplyr::left_join(port_holdings_forex, by = c("Currency" = "Symbol")) %>% 
         dplyr::mutate(
+          `Account Number` = acct_number,
           `Market Date` = curr_mkt_date,
           Position = ifelse(is.na(Position), 0, Position),
           `Market Price` = ifelse(is.na(`Market Price`), 1, `Market Price`)) %>% 
@@ -368,7 +376,7 @@ IBTradingSession <- R6::R6Class(
         dplyr::mutate(
           `CAD Balance` = Balance * `Exchange Rate`
         ) %>% 
-        dplyr::select(dplyr::one_of(c("Market Date","Name","Currency","Balance","Exchange Rate","CAD Balance")))
+        dplyr::select(dplyr::one_of(c("Market Date","Account Number","Name","Currency","Balance","Exchange Rate","CAD Balance")))
       self$ts_cash_balance <- cash_balance
       
       #
@@ -391,13 +399,13 @@ IBTradingSession <- R6::R6Class(
         dplyr::filter(`Security Type` != "FUT") %>%
         dplyr::group_by(Currency, `Security Type`) %>% 
         dplyr::summarise(Balance = sum(`Market Value`)) %>% 
-        dplyr::mutate(`Market Date` = curr_mkt_date, `Market Datetime` = curr_mkt_datetime_str) %>% 
-        dplyr::select(dplyr::one_of(c("Market Date","Market Datetime","Security Type","Currency","Balance")))
+        dplyr::mutate(`Market Date` = curr_mkt_date, `Market Datetime` = curr_mkt_datetime_str, `Account Number` = acct_number) %>% 
+        dplyr::select(dplyr::one_of(c("Market Date","Market Datetime","Account Number","Security Type","Currency","Balance")))
       
       # cash portion
       acc_recon2 <- cash_balance %>% 
         dplyr::mutate(`Market Datetime` = curr_mkt_datetime_str, `Security Type` = "Cash") %>% 
-        dplyr::select(dplyr::one_of(c("Market Date","Market Datetime","Security Type","Currency","Balance")))
+        dplyr::select(dplyr::one_of(c("Market Date","Market Datetime","Account Number","Security Type","Currency","Balance")))
       
       # portfort info portion
       acc_recon3 <- data.frame(
@@ -412,9 +420,10 @@ IBTradingSession <- R6::R6Class(
         dplyr::mutate(
           `Market Date` = curr_mkt_date,
           `Market Datetime` = curr_mkt_datetime_str,
+          `Account Number` = acct_number,
           Balance = ifelse(is.na(Value), 0, Value)
         ) %>% 
-        dplyr::select(dplyr::one_of(c("Market Date", "Market Datetime", "Security Type", "Currency", "Balance")))
+        dplyr::select(dplyr::one_of(c("Market Date", "Market Datetime","Account Number","Security Type", "Currency", "Balance")))
       
       # combine all three portions
       tmp <- dplyr::bind_rows(list(
